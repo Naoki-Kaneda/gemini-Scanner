@@ -1,6 +1,6 @@
 """
 検出結果の日本語翻訳辞書。
-Google Cloud Vision APIの各種検出結果を日本語で表示するために使用。
+Gemini APIの各種検出結果を日本語で表示するために使用。
 """
 
 OBJECT_TRANSLATIONS = {
