@@ -588,6 +588,27 @@ class TestSecurityHeaders:
         assert "X-XSS-Protection" not in response.headers
 
 
+# ─── Cache-Control 回帰テスト ──────────────────────────
+class TestCacheControl:
+    """Cache-Control ポリシーの分離が維持されていることの回帰テスト。"""
+
+    def test_APIレスポンスはno_storeである(self, client):
+        """API（HTMLを含む非静的パス）は no-store でキャッシュ無効であること。"""
+        response = client.get("/")
+        cc = response.headers.get("Cache-Control", "")
+        assert "no-store" in cc, f"HTMLレスポンスに no-store が含まれない: {cc}"
+
+    def test_静的ファイルはimmutableでキャッシュされる(self, client):
+        """/static/ パスは immutable + 長期キャッシュであること。"""
+        # Flask テストクライアントでは /static/ が実在しなくても after_request は通る
+        # 実際の静的ファイルでテスト
+        response = client.get("/static/style.css")
+        # 404でもafter_requestは実行されるためヘッダーは付与される
+        cc = response.headers.get("Cache-Control", "")
+        assert "immutable" in cc, f"静的ファイルに immutable が含まれない: {cc}"
+        assert "max-age=31536000" in cc, f"静的ファイルに max-age=31536000 が含まれない: {cc}"
+
+
 # ─── Request-ID テスト ──────────────────────────
 class TestRequestId:
     """リクエスト相関IDのテスト。"""
@@ -633,7 +654,7 @@ class TestCors:
         """許可されたOriginにはCORSヘッダーが付与されること。"""
         response = client.get("/", headers={"Origin": "https://trusted.example.com"})
         assert response.headers.get("Access-Control-Allow-Origin") == "https://trusted.example.com"
-        assert response.headers.get("Vary") == "Origin"
+        assert "Origin" in response.headers.get("Vary", "")
 
     @patch("app.ALLOWED_ORIGINS", ["https://trusted.example.com"])
     def test_許可されていないOriginにはCORSヘッダーが付かない(self, client):

@@ -3,18 +3,22 @@ echo === Gemini Vision Scanner 起動 ===
 
 REM ポート5000を使用中のプロセスを確認・停止（安全確認付き）
 set "FOUND="
+set "PID_LIST="
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5000 ^| findstr LISTENING') do (
     set "FOUND=1"
-    echo [!] ポート5000を使用中のプロセスが見つかりました:
-    echo     PID: %%a
-    for /f "tokens=1" %%b in ('tasklist /fi "PID eq %%a" /fo csv /nh 2^>nul') do (
-        echo     プロセス名: %%b
-    )
+    set "PID_LIST=!PID_LIST! %%a"
 )
 
+setlocal enabledelayedexpansion
 if defined FOUND (
+    echo [!] ポート5000を使用中のプロセスが見つかりました:
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5000 ^| findstr LISTENING') do (
+        for /f "tokens=1" %%b in ('tasklist /fi "PID eq %%a" /fo csv /nh 2^>nul') do (
+            echo     PID: %%a  プロセス名: %%b
+        )
+    )
     set /p ANSWER="これらのプロセスを停止しますか？ (y/N): "
-    if /i "%ANSWER%"=="y" (
+    if /i "!ANSWER!"=="y" (
         for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5000 ^| findstr LISTENING') do (
             taskkill /PID %%a >nul 2>&1
         )
@@ -31,6 +35,7 @@ if defined FOUND (
         exit /b 1
     )
 )
+endlocal
 
 echo [OK] Flask起動中...
 python app.py

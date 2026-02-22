@@ -36,6 +36,8 @@ FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 MAX_IMAGE_SIZE = 5 * 1024 * 1024          # 5MB（Base64デコード後）
 MAX_REQUEST_BODY = 10 * 1024 * 1024       # 10MB（Base64 + JSONオーバーヘッド）
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")  # 管理API認証用シークレット
+# レート制限キー方式: "ip_ua"=IP+UserAgent複合キー, "ip"=IPのみ
+RATE_LIMIT_KEY_MODE = os.getenv("RATE_LIMIT_KEY_MODE", "ip_ua").lower()
 
 # ─── エラーコード定数（タイポ防止） ────────────────────
 ERR_INVALID_FORMAT = "INVALID_FORMAT"
@@ -192,7 +194,11 @@ def add_security_headers(response):
             response.headers["Access-Control-Allow-Headers"] = "Content-Type"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         # CDN/プロキシが異なるOrigin向けレスポンスを混在キャッシュしないよう Vary を付与
-        response.headers["Vary"] = "Origin"
+        # 既存の Vary 値（例: Accept-Encoding）を保持して Origin を追記
+        existing_vary = response.headers.get("Vary", "")
+        if "Origin" not in existing_vary:
+            new_vary = f"{existing_vary}, Origin" if existing_vary else "Origin"
+            response.headers["Vary"] = new_vary
 
     return response
 
@@ -442,10 +448,13 @@ def analyze_endpoint():
         return validation_error
 
     # ─── レート制限チェック＆予約（原子的） ──
-    # IP + User-Agent先頭64文字のハッシュで複合キー生成（NAT配下の干渉軽減）
     client_ip = request.remote_addr or "unknown"
-    ua_fragment = (request.headers.get("User-Agent", "") or "")[:64]
-    rate_key = f"{client_ip}:{hashlib.sha256(ua_fragment.encode()).hexdigest()[:8]}"
+    if RATE_LIMIT_KEY_MODE == "ip_ua":
+        # IP + User-Agent先頭64文字のハッシュで複合キー生成（NAT配下の干渉軽減）
+        ua_fragment = (request.headers.get("User-Agent", "") or "")[:64]
+        rate_key = f"{client_ip}:{hashlib.sha256(ua_fragment.encode()).hexdigest()[:8]}"
+    else:
+        rate_key = client_ip
     limited, limit_message, request_id = try_consume_request(rate_key)
     if limited:
         _log("info", "rate_limited", ip=client_ip, reason=limit_message)

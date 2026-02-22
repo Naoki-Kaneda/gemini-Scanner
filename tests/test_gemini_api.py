@@ -626,3 +626,39 @@ class TestMimeConsistency:
         import base64
         decoded = base64.b64decode(sent_data)
         assert decoded[:3] == b'\xff\xd8\xff'
+
+
+# ─── _ensure_jpeg 回帰テスト ────────────────────────
+class TestEnsureJpeg:
+    """_ensure_jpeg の入出力を直接検証する回帰テスト。"""
+
+    def test_PNG入力がJPEGバイナリに変換される(self):
+        """PNG Base64を渡すとJPEGヘッダー付きBase64が返ること。"""
+        import base64
+        from gemini_api import _ensure_jpeg
+        png_b64 = create_valid_png_base64()
+        result_b64 = _ensure_jpeg(png_b64, enhance=False)
+        decoded = base64.b64decode(result_b64)
+        # JPEG マジックバイト (FFD8FF)
+        assert decoded[:3] == b'\xff\xd8\xff', "出力がJPEGフォーマットでない"
+
+    def test_enhance有効時もJPEGバイナリが返る(self):
+        """enhance=True（text/labelモード用）でもJPEG出力であること。"""
+        import base64
+        from gemini_api import _ensure_jpeg
+        png_b64 = create_valid_png_base64()
+        result_b64 = _ensure_jpeg(png_b64, enhance=True)
+        decoded = base64.b64decode(result_b64)
+        assert decoded[:3] == b'\xff\xd8\xff', "enhance=True時の出力がJPEGフォーマットでない"
+
+    def test_JPEG入力もそのままJPEGで返る(self):
+        """JPEG Base64を渡しても正常にJPEG出力されること（冪等性）。"""
+        import base64
+        from gemini_api import _ensure_jpeg
+        png_b64 = create_valid_png_base64()
+        # まずJPEGに変換
+        jpeg_b64 = _ensure_jpeg(png_b64, enhance=False)
+        # JPEG→JPEG（冪等性）
+        result_b64 = _ensure_jpeg(jpeg_b64, enhance=False)
+        decoded = base64.b64decode(result_b64)
+        assert decoded[:3] == b'\xff\xd8\xff', "JPEG→JPEG変換で出力がJPEGでない"
