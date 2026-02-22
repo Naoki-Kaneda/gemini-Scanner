@@ -268,37 +268,38 @@ SHARPNESS_FACTOR = 1.5         # シャープネス強調係数（文字の輪�
 JPEG_QUALITY = 95              # JPEG保存品質
 BOX_SCALE = 1000               # Gemini box_2d 座標の正規化スケール（0〜1000）
 
+# ─── Thinking戦略テーブル ────────────────────────────
+# (世代プレフィックス, タイプキーワード) → thinkingConfig辞書
+# 空辞書はペイロードからthinkingConfigキーごと除外される（＝APIデフォルトに委任）
+_THINKING_STRATEGY_TABLE = {
+    ("gemini-2", "flash"): {"thinkingBudget": 0},       # 思考無効化
+    ("gemini-2", "pro"):   {},                           # 無効化不可 → 設定を送らない
+    ("gemini-3", "flash"): {"thinkingLevel": "MINIMAL"}, # 最小思考
+    ("gemini-3", "pro"):   {"thinkingLevel": "LOW"},     # MINIMAL非対応のため LOW
+}
+
+_warned_unknown_model = set()  # 未知モデル警告の重複抑制
+
 
 def _resolve_thinking_config():
     """モデルに応じた thinkingConfig を返す。
 
-    モデル別の戦略:
-        gemini-2.x Flash系 → thinkingBudget: 0（思考無効化）
-        gemini-2.x Pro系   → 空辞書（thinking無効化不可のため設定を送らない）
-        gemini-3.x Flash系 → thinkingLevel: MINIMAL（最小思考）
-        gemini-3.x Pro系   → thinkingLevel: LOW（MINIMALは非対応）
-        未知モデル          → 空辞書（安全側: thinking設定を送らない）
+    _THINKING_STRATEGY_TABLE を参照し、世代×タイプで戦略を決定する。
+    未知モデルは空辞書を返し、ペイロードからthinkingConfigを除外する（安全側）。
 
     Returns:
         dict: thinkingConfig辞書。空辞書の場合はペイロードからキーごと除外される。
     """
     model = GEMINI_MODEL.lower()
-    is_flash = "flash" in model
-    is_pro = "pro" in model
 
-    if model.startswith("gemini-3"):
-        if is_flash:
-            return {"thinkingLevel": "MINIMAL"}
-        if is_pro:
-            return {"thinkingLevel": "LOW"}
-    elif model.startswith("gemini-2"):
-        if is_flash:
-            return {"thinkingBudget": 0}
-        if is_pro:
-            return {}  # 2.x Pro は thinking 無効化不可
+    for (gen_prefix, type_keyword), config in _THINKING_STRATEGY_TABLE.items():
+        if model.startswith(gen_prefix) and type_keyword in model:
+            return config
 
-    # 未知モデル: 安全側に倒す（設定を送らない）
-    logger.info("未知モデル '%s' のthinking設定をスキップします", GEMINI_MODEL)
+    # 未知モデル: 安全側に倒す（初回のみ警告ログ）
+    if GEMINI_MODEL not in _warned_unknown_model:
+        _warned_unknown_model.add(GEMINI_MODEL)
+        logger.warning("未知モデル '%s' のthinking設定をスキップします", GEMINI_MODEL)
     return {}
 
 
@@ -722,7 +723,9 @@ def detect_content(image_b64, mode="text", request_id="", context_hint=""):
             return _make_success([])
 
         # 複数partにテキストが分割される場合があるため全partを結合する
-        # thoughtパートやfunctionCall等のtext無しpartは除外する
+        # 除外対象:
+        #   - thought=True のpart（思考過程テキスト。JSON本文に混ぜると解析が壊れる）
+        #   - text が無いpart（functionCall等の非テキスト応答）
         raw_text = "".join(
             p.get("text", "") for p in parts
             if p.get("text") and not p.get("thought")

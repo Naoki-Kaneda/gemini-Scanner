@@ -431,6 +431,19 @@ class TestResolveThinkingConfig:
         finally:
             gemini_api.GEMINI_MODEL = original
 
+    def test_未知モデルでペイロードにthinkingConfigキーが含まれない(self):
+        """未知モデルの場合、ペイロードからthinkingConfigが除外されること。"""
+        import gemini_api
+        original = gemini_api.GEMINI_MODEL
+        gemini_api.GEMINI_MODEL = "gemini-4-ultra"
+        try:
+            payload = gemini_api._build_gemini_payload(
+                make_b64(), mode="text", context_hint=""
+            )
+            assert "thinkingConfig" not in payload["generationConfig"]
+        finally:
+            gemini_api.GEMINI_MODEL = original
+
 
 # ─── parts結合テスト ───────────────────────────────
 class TestPartsJoining:
