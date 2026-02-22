@@ -47,6 +47,10 @@ const ENFORCE_CLIENT_DAILY_LIMIT = false;
 const FETCH_TIMEOUT_MS = 60000;      // fetch タイムアウト（Gemini API 30秒×リトライ＋余裕）
 let DUPLICATE_SKIP_COUNT = 2;        // 同じ結果がN回連続したらカメラ移動まで一時停止（UI設定で変更可）
 
+// 画像ハッシュ比較: API送信前に前回送信画像との類似度を判定
+const IMAGE_HASH_SIZE = 8;           // ハッシュ用縮小画像サイズ（8x8=64ピクセル）
+const IMAGE_HASH_THRESHOLD = 0.95;   // 類似度の閾値（0.95=95%一致でスキップ）
+
 // モードごとのバウンディングボックス色設定
 const MODE_BOX_CONFIG = {
     text:     { color: '#00ff88', bg: 'rgba(0, 255, 136, 0.7)',   showLabel: false },
@@ -90,6 +94,7 @@ let retryTimerId = null;      // 再試行用タイマーID
 let cooldownTimerId = null;   // レート制限クールダウンタイマーID
 let cooldownRemaining = 0;    // クールダウン残り秒数（0 = クールダウン中でない）
 let isAnalyzing = false;      // API呼び出し中フラグ（並行呼び出し防止）
+let lastSentImageHash = null; // 前回送信した画像のハッシュ値（重複送信防止用）
 let lastResultFingerprint = null;    // 直前のAPI結果の指紋（重複検出用）
 let duplicateCount = 0;              // 同じ結果の連続回数
 let isDuplicatePaused = false;       // 重複検出による一時停止状態
@@ -104,6 +109,46 @@ const motionCanvas = document.createElement('canvas');
 motionCanvas.width = MOTION_CANVAS_WIDTH;
 motionCanvas.height = MOTION_CANVAS_HEIGHT;
 const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+
+// 画像ハッシュ比較用キャンバス（8x8グレースケール）
+const hashCanvas = document.createElement('canvas');
+hashCanvas.width = IMAGE_HASH_SIZE;
+hashCanvas.height = IMAGE_HASH_SIZE;
+const hashCtx = hashCanvas.getContext('2d', { willReadFrequently: true });
+
+/**
+ * Canvas上の画像から8x8グレースケールハッシュを生成する。
+ * drawImage済みのcanvasを引数に取り、8x8に縮小してグレースケール値の配列を返す。
+ * @param {HTMLCanvasElement} srcCanvas - 描画済みのキャプチャキャンバス
+ * @returns {Uint8Array} 64要素のグレースケール値配列（0〜255）
+ */
+function computeImageHash(srcCanvas) {
+    hashCtx.drawImage(srcCanvas, 0, 0, IMAGE_HASH_SIZE, IMAGE_HASH_SIZE);
+    const pixels = hashCtx.getImageData(0, 0, IMAGE_HASH_SIZE, IMAGE_HASH_SIZE).data;
+    const gray = new Uint8Array(IMAGE_HASH_SIZE * IMAGE_HASH_SIZE);
+    for (let i = 0; i < gray.length; i++) {
+        // ITU-R BT.601 輝度変換: 0.299R + 0.587G + 0.114B
+        gray[i] = Math.round(pixels[i * 4] * 0.299 + pixels[i * 4 + 1] * 0.587 + pixels[i * 4 + 2] * 0.114);
+    }
+    return gray;
+}
+
+/**
+ * 2つの画像ハッシュの類似度を計算する（0.0〜1.0）。
+ * 各ピクセルの差分の平均を255で正規化し、1から引いて類似度に変換。
+ * @param {Uint8Array} hashA - 比較元ハッシュ
+ * @param {Uint8Array} hashB - 比較先ハッシュ
+ * @returns {number} 類似度（1.0 = 完全一致、0.0 = 完全不一致）
+ */
+function compareImageHash(hashA, hashB) {
+    if (!hashA || !hashB || hashA.length !== hashB.length) return 0;
+    let totalDiff = 0;
+    for (let i = 0; i < hashA.length; i++) {
+        totalDiff += Math.abs(hashA[i] - hashB[i]);
+    }
+    const avgDiff = totalDiff / (hashA.length * 255);
+    return 1 - avgDiff;
+}
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -180,6 +225,38 @@ async function loadRateLimits() {
     } catch (err) {
         console.error('レート制限設定取得エラー:', err);
         if (apiCounter) apiCounter.title = '設定取得に失敗しました';
+    }
+}
+
+/**
+ * サーバーからAPI使用量を取得し、ローカルカウントを同期する。
+ * NAT/マルチデバイス環境でlocalStorageの値とサーバー側の値が乖離する問題を解消する。
+ * サーバー値がローカル値より大きい場合のみ上書きする（他端末の消費を反映）。
+ */
+async function syncApiUsage() {
+    try {
+        const res = await fetch('/api/config/usage', { signal: fetchSignal() });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // サーバー側の上限設定も同期
+        if (data.daily_limit > 0) API_DAILY_LIMIT = data.daily_limit;
+
+        // サーバー値がローカルより大きい場合のみ上書き（他端末の消費を反映）
+        if (data.daily_count > apiCallCount) {
+            apiCallCount = data.daily_count;
+            saveApiUsage();
+        }
+
+        // サーバー側で既に日次上限に達していればボタンを無効化
+        if (data.daily_count >= data.daily_limit) {
+            if (statusText) statusText.textContent = '⚠ 本日のAPI上限に達しています';
+            disableScanButton('本日の上限に到達');
+        }
+
+        updateApiCounter();
+    } catch (err) {
+        console.error('API使用量同期エラー:', err);
     }
 }
 
@@ -821,6 +898,23 @@ async function captureAndAnalyze() {
     canvas.height = dstH;
     ctx.drawImage(sourceEl, srcX, srcY, srcW, srcH, 0, 0, dstW, dstH);
 
+    // 画像ハッシュ比較: 前回送信した画像とほぼ同一ならAPI呼び出しをスキップ
+    const currentHash = computeImageHash(canvas);
+    if (lastSentImageHash) {
+        const similarity = compareImageHash(currentHash, lastSentImageHash);
+        if (similarity >= IMAGE_HASH_THRESHOLD) {
+            console.log(`画像ハッシュ一致 (類似度: ${(similarity * 100).toFixed(1)}%) — API送信スキップ`);
+            if (statusText) statusText.textContent = '前回と同じ画像のためスキップしました';
+            isScanning = false;
+            if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
+            _setBtnScanContent('📷', 'スタート');
+            btnScan.disabled = false;
+            if (videoContainer) videoContainer.classList.remove('scanning');
+            if (statusDot) statusDot.classList.remove('active');
+            return;
+        }
+    }
+
     const imageData = canvas.toDataURL('image/jpeg', imgConfig.quality);
 
     // シングルショット: キャプチャ完了後、スキャンループを停止して解析待機状態に遷移
@@ -868,6 +962,7 @@ async function captureAndAnalyze() {
         // 成功時のみカウント加算（失敗時はAPI消費しない）
         if (result.ok) {
             succeeded = true;
+            lastSentImageHash = currentHash; // 成功時のみハッシュを保存（失敗時は再試行可能）
             apiCallCount++;
             saveApiUsage();
 
@@ -1576,7 +1671,8 @@ function init() {
     updateMirrorState();
     loadApiUsage();
     // 初期設定を並列取得（片方が失敗しても他方に影響しない）
-    Promise.allSettled([loadRateLimits(), loadProxyConfig()]);
+    // syncApiUsage: サーバーの実カウントでlocalStorage値を補正（NAT/マルチデバイス対応）
+    Promise.allSettled([loadRateLimits(), loadProxyConfig(), syncApiUsage()]);
 }
 
 document.addEventListener('DOMContentLoaded', init);

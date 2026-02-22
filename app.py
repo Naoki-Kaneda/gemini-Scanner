@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from gemini_api import detect_content, get_proxy_status, set_proxy_enabled, VALID_MODES, API_KEY
 from rate_limiter import (
     try_consume_request, release_request, RATE_LIMIT_DAILY,
-    get_backend_type, REDIS_URL,
+    RATE_LIMIT_PER_MINUTE, get_daily_count, get_backend_type, REDIS_URL,
 )
 
 # ─── 設定 ──────────────────────────────────────
@@ -253,6 +253,16 @@ def handle_method_not_allowed(_e):
     }), 405
 
 
+# ─── レートキー生成 ──────────────────────────────
+def _build_rate_key():
+    """リクエストのIP（+UserAgent）からレート制限キーを生成する。"""
+    client_ip = request.remote_addr or "unknown"
+    if RATE_LIMIT_KEY_MODE == "ip_ua":
+        ua_fragment = (request.headers.get("User-Agent", "") or "")[:64]
+        return client_ip, f"{client_ip}:{hashlib.sha256(ua_fragment.encode()).hexdigest()[:8]}"
+    return client_ip, client_ip
+
+
 # ─── レスポンスヘルパー ────────────────────────────
 def _error_response(error_code, message, status_code=400, headers=None):
     """標準化されたエラーレスポンスを生成する。headersで追加HTTPヘッダーを指定可能。"""
@@ -353,6 +363,28 @@ def index():
 def get_rate_limits():
     """レート制限設定値をフロントエンドに返す"""
     return jsonify({"daily_limit": RATE_LIMIT_DAILY})
+
+
+@app.route("/api/config/usage", methods=["GET"])
+def get_usage():
+    """
+    現在のAPI使用量をサーバー側の実データから返す。
+
+    フロントエンドの localStorage カウントはブラウザ・端末ごとに分断されるため、
+    NAT環境やマルチデバイスで不整合が発生する。このエンドポイントで正確な値を提供する。
+
+    レスポンスJSON:
+        daily_count: 今日のAPI呼び出し回数（サーバー側カウント）
+        daily_limit: 1日のAPI呼び出し上限
+        per_minute_limit: 分あたりのAPI呼び出し上限
+    """
+    _client_ip, rate_key = _build_rate_key()
+    count = get_daily_count(rate_key)
+    return jsonify({
+        "daily_count": count,
+        "daily_limit": RATE_LIMIT_DAILY,
+        "per_minute_limit": RATE_LIMIT_PER_MINUTE,
+    })
 
 
 @app.route("/api/config/proxy", methods=["GET"])
@@ -468,13 +500,7 @@ def analyze_endpoint():
         return validation_error
 
     # ─── レート制限チェック＆予約（原子的） ──
-    client_ip = request.remote_addr or "unknown"
-    if RATE_LIMIT_KEY_MODE == "ip_ua":
-        # IP + User-Agent先頭64文字のハッシュで複合キー生成（NAT配下の干渉軽減）
-        ua_fragment = (request.headers.get("User-Agent", "") or "")[:64]
-        rate_key = f"{client_ip}:{hashlib.sha256(ua_fragment.encode()).hexdigest()[:8]}"
-    else:
-        rate_key = client_ip
+    client_ip, rate_key = _build_rate_key()
     limited, limit_message, request_id = try_consume_request(rate_key)
     if limited:
         is_daily = "日" in limit_message
