@@ -1,0 +1,1199 @@
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Vision AI Scanner - Material Design 3 Dark Theme
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+/* ─── MD3 カラートークン（ダークテーマ） ─────────── */
+:root {
+    --md-primary: #A8C7FA;
+    --md-on-primary: #062E6F;
+    --md-primary-container: #1B4A8B;
+    --md-on-primary-container: #D3E3FD;
+    --md-secondary: #BCC7DC;
+    --md-on-secondary: #263141;
+    --md-secondary-container: #3C4758;
+    --md-tertiary: #D4BEE6;
+    --md-error: #FFB4AB;
+    --md-error-container: #93000A;
+    --md-on-error-container: #FFDAD6;
+    --md-surface: #131316;
+    --md-surface-container-lowest: #0E0E11;
+    --md-surface-container-low: #1B1B1F;
+    --md-surface-container: #1F1F23;
+    --md-surface-container-high: #2A2A2E;
+    --md-surface-container-highest: #353539;
+    --md-on-surface: #E5E1E6;
+    --md-on-surface-variant: #C7C5D0;
+    --md-outline: #918F9A;
+    --md-outline-variant: #49474E;
+    /* エレベーション */
+    --md-elevation-1: 0 1px 3px 1px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --md-elevation-2: 0 2px 6px 2px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.3);
+    /* トランジション */
+    --md-motion-standard: 0.2s cubic-bezier(0.2, 0, 0, 1);
+    --md-motion-emphasized: 0.3s cubic-bezier(0.2, 0, 0, 1);
+    --md-shape-corner-m: 12px;
+    --md-shape-corner-l: 16px;
+    --md-shape-corner-xl: 28px;
+    --md-shape-corner-full: 9999px;
+    /* ターゲットボックス寸法（JS側と共有する信頼できる唯一の定義） */
+    --target-box-left: 1%;
+    --target-box-width: 98%;
+    --target-box-top: 1%;
+    --target-box-height: 97%;
+}
+
+/* ─── リセット ──────────────────────────────── */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* ─── ユーティリティ ──────────────────────────── */
+.hidden {
+    display: none !important;
+}
+
+/* ─── ベースレイアウト ───────────────────────── */
+body {
+    font-family: 'Inter', 'Noto Sans JP', sans-serif;
+    background-color: var(--md-surface);
+    color: var(--md-on-surface);
+    height: 100dvh;  /* モバイルブラウザのUIバー考慮（フォールバック: 100vh） */
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+@supports (height: 100dvh) {
+    body { height: 100dvh; }
+}
+
+.container {
+    width: 95%;
+    height: 92vh;
+    max-width: 1400px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ─── ヘッダー（Top App Bar風） ─────────────── */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    background: var(--md-surface-container);
+    border-radius: var(--md-shape-corner-l);
+    min-height: 48px;
+}
+
+h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--md-on-surface);
+    letter-spacing: 0;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#status-dot {
+    width: 8px;
+    height: 8px;
+    background-color: var(--md-outline);
+    border-radius: 50%;
+    transition: all var(--md-motion-standard);
+}
+
+#status-dot.active {
+    background-color: var(--md-primary);
+    box-shadow: 0 0 8px rgba(168, 199, 250, 0.5);
+}
+
+#status-text {
+    font-size: 0.8rem;
+    color: var(--md-on-surface-variant);
+}
+
+/* ─── MD3 Chip（API/Proxy表示） ────────────── */
+.api-counter {
+    font-size: 0.75rem;
+    color: var(--md-primary);
+    font-family: 'Inter', monospace;
+    padding: 4px 12px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-corner-full);
+    background: transparent;
+    line-height: 1;
+}
+
+.proxy-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface-variant);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-corner-full);
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    cursor: default;
+    font-family: inherit;
+    transition: all var(--md-motion-standard);
+    line-height: 1;
+}
+
+.proxy-badge.active {
+    background: var(--md-primary-container);
+    color: var(--md-on-primary-container);
+    border-color: var(--md-primary-container);
+}
+
+.proxy-badge.inactive {
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface-variant);
+    border-color: var(--md-outline-variant);
+}
+
+/* ─── 重複スキップバッジ ──────────────────────── */
+.dup-skip-badge {
+    font-size: 0.7rem;
+    font-family: 'Inter', monospace;
+    padding: 3px 8px;
+    border-radius: var(--md-shape-corner-full);
+    line-height: 1;
+    white-space: nowrap;
+    transition: all var(--md-motion-standard);
+}
+
+.dup-skip-badge.counting {
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface-variant);
+    border: 1px solid var(--md-outline-variant);
+}
+
+.dup-skip-badge.paused {
+    background: var(--md-error-container);
+    color: var(--md-on-error-container);
+    border: 1px solid var(--md-error);
+    animation: dup-pulse 2s ease-in-out infinite;
+}
+
+@keyframes dup-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* ─── メイングリッド ────────────────────────── */
+.main-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ─── パネル共通（MD3 Surface Container） ───── */
+.panel {
+    background: var(--md-surface-container);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-corner-l);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: var(--md-elevation-1);
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* ヘルプポップアップがはみ出せるようにビデオパネルだけoverflowを解除 */
+.video-panel {
+    position: relative;
+    overflow: visible;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+h2 {
+    font-size: 0.9rem;
+    color: var(--md-on-surface-variant);
+    font-weight: 600;
+    margin-right: auto;
+    display: none;
+}
+
+/* ─── 映像コンテナ ──────────────────────────── */
+.video-container {
+    flex: 1;
+    background: #000;
+    border-radius: var(--md-shape-corner-m);
+    overflow: hidden;
+    position: relative;
+    border: 1px solid var(--md-outline-variant);
+    max-height: 65vh;
+}
+
+video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* ─── ミラー反転 ──────────────────────────────── */
+.video-container.mirrored video {
+    transform: scaleX(-1);
+}
+
+/* ─── バウンディングボックスオーバーレイ ──────────── */
+#overlay-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 15;
+}
+
+/* ─── スキャンオーバーレイ（走査線） ────────────── */
+.scan-overlay {
+    position: absolute;
+    top: 50%;
+    left: 10%;
+    width: 80%;
+    height: 2px;
+    background: var(--md-primary);
+    box-shadow: 0 0 12px rgba(168, 199, 250, 0.4);
+    opacity: 0;
+    transition: opacity var(--md-motion-standard);
+}
+
+.scanning .scan-overlay {
+    opacity: 1;
+    animation: scanAnimation 2s infinite ease-in-out;
+}
+
+@keyframes scanAnimation {
+    0% { top: 10%; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 90%; opacity: 0; }
+}
+
+/* ─── ターゲットボックス ─────────────────────── */
+.target-box {
+    position: absolute;
+    top: var(--target-box-top);
+    left: var(--target-box-left);
+    width: var(--target-box-width);
+    height: var(--target-box-height);
+    border: 2px dashed rgba(168, 199, 250, 0.5);
+    border-radius: var(--md-shape-corner-m);
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+}
+
+/* ─── 安定化プログレスバー（MD3 Linear Progress） ─ */
+.stability-bar-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.stability-bar-track {
+    width: 100%;
+    height: 4px;
+    background: rgba(168, 199, 250, 0.15);
+    overflow: hidden;
+}
+
+.stability-bar-fill {
+    width: 0%;
+    height: 100%;
+    background: var(--md-primary);
+    transition: width 0.15s linear;
+}
+
+.stability-bar-fill.captured {
+    background: #81C784;
+    transition: width 0.05s linear;
+}
+
+.stability-help {
+    color: var(--md-on-surface);
+    font-size: 0.75rem;
+    background: var(--md-surface-container-highest);
+    padding: 4px 12px;
+    border-radius: 0 0 8px 8px;
+    line-height: 1.4;
+    opacity: 0.9;
+}
+
+/* ─── 映像内ツールバー ──────────────────────── */
+.video-tools {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    z-index: 15;
+    background: var(--md-surface-container-highest);
+    padding: 4px 8px;
+    border-radius: var(--md-shape-corner-full);
+}
+
+/* ─── MD3 Tool Button（アイコンボタン風） ────── */
+.tool-btn {
+    background: transparent;
+    border: 1px solid var(--md-outline-variant);
+    color: var(--md-on-surface-variant);
+    padding: 6px 12px;
+    border-radius: var(--md-shape-corner-full);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition: all var(--md-motion-standard);
+}
+
+.tool-btn:hover {
+    background: rgba(168, 199, 250, 0.08);
+    color: var(--md-on-surface);
+}
+
+/* ─── MD3 Segmented Button（モード切替 2段レイアウト） ── */
+.mode-switch-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mode-switch {
+    display: flex;
+    border: 1px solid var(--md-outline);
+    border-radius: var(--md-shape-corner-full);
+    overflow: hidden;
+}
+
+.mode-btn {
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--md-outline);
+    color: var(--md-on-surface-variant);
+    padding: 5px 12px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-family: inherit;
+    font-weight: 600;
+    transition: all var(--md-motion-standard);
+}
+
+.mode-btn:last-child {
+    border-right: none;
+}
+
+.mode-btn.active {
+    background: var(--md-secondary-container);
+    color: var(--md-on-surface);
+}
+
+.mode-btn:hover:not(.active) {
+    background: rgba(188, 199, 220, 0.08);
+    color: var(--md-on-surface);
+}
+
+/* ─── ヘルプボタン ──────────────────────────── */
+.help-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--md-outline);
+    background: transparent;
+    color: var(--md-on-surface-variant);
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--md-motion-standard);
+    flex-shrink: 0;
+}
+
+.help-btn:hover {
+    background: rgba(168, 199, 250, 0.15);
+    color: var(--md-primary);
+    border-color: var(--md-primary);
+}
+
+/* ─── ヘルプポップアップ ────────────────────── */
+.help-popup {
+    position: absolute;
+    bottom: 64px;
+    right: 8px;
+    width: 300px;
+    background: var(--md-surface-container-highest);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-corner-l);
+    box-shadow: var(--md-elevation-2);
+    z-index: 100;
+    animation: helpFadeIn 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes helpFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.help-popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.help-popup-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--md-on-surface);
+}
+
+.help-popup-close {
+    background: transparent;
+    border: none;
+    color: var(--md-on-surface-variant);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    border-radius: 50%;
+    transition: background var(--md-motion-standard);
+}
+
+.help-popup-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.help-popup-body {
+    padding: 12px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.help-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.help-item p {
+    font-size: 0.78rem;
+    color: var(--md-on-surface-variant);
+    line-height: 1.5;
+    margin: 0;
+}
+
+.help-mode-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: var(--md-shape-corner-full);
+    width: fit-content;
+}
+
+.help-mode-badge.text {
+    background: var(--md-secondary-container);
+    color: var(--md-on-surface);
+}
+
+.help-mode-badge.object {
+    background: var(--md-secondary-container);
+    color: var(--md-on-surface);
+}
+
+.help-mode-badge.label {
+    background: var(--md-primary-container);
+    color: var(--md-on-primary-container);
+}
+
+.help-mode-badge.face {
+    background: rgba(0, 191, 255, 0.2);
+    color: #00bfff;
+}
+
+.help-mode-badge.logo {
+    background: rgba(212, 190, 230, 0.2);
+    color: var(--md-tertiary);
+}
+
+.help-mode-badge.classify {
+    background: rgba(129, 199, 132, 0.2);
+    color: #81C784;
+}
+
+.help-mode-badge.web {
+    background: rgba(255, 183, 77, 0.2);
+    color: #FFB74D;
+}
+
+.help-ok {
+    color: #00c853;
+    font-weight: 700;
+}
+
+.help-ng {
+    color: #ff3b3b;
+    font-weight: 700;
+}
+
+/* ─── ヘルプ内設定セクション ──────────────────── */
+.help-settings {
+    padding: 10px 16px 8px;
+    border-top: 1px solid var(--md-outline-variant);
+    margin-top: 4px;
+}
+
+.help-settings-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--md-primary);
+    margin-bottom: 8px;
+    letter-spacing: 0.05em;
+}
+
+.help-setting-item label {
+    font-size: 0.78rem;
+    color: var(--md-on-surface);
+    font-weight: 500;
+}
+
+.help-setting-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.help-setting-control input[type="range"] {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--md-outline-variant);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+.help-setting-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--md-primary);
+    border: 2px solid var(--md-surface);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+}
+
+.help-setting-control input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--md-primary);
+    border: 2px solid var(--md-surface);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+}
+
+.help-setting-value {
+    font-size: 0.78rem;
+    color: var(--md-primary);
+    font-weight: 600;
+    min-width: 28px;
+    text-align: right;
+}
+
+.help-setting-desc {
+    font-size: 0.68rem;
+    color: var(--md-outline);
+    margin: 4px 0 0;
+    line-height: 1.4;
+}
+
+.help-version {
+    padding: 8px 16px 12px;
+    font-size: 0.68rem;
+    color: var(--md-outline);
+    text-align: right;
+    border-top: 1px solid var(--md-outline-variant);
+    margin-top: 4px;
+}
+
+/* ─── MD3 Outlined Button（ソース切替） ─────── */
+.controls {
+    display: flex;
+    gap: 8px;
+}
+
+.control-btn {
+    background: transparent;
+    border: 1px solid var(--md-outline);
+    color: var(--md-on-surface-variant);
+    padding: 6px 16px;
+    border-radius: var(--md-shape-corner-full);
+    cursor: pointer;
+    transition: all var(--md-motion-standard);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.control-btn.active {
+    background: var(--md-secondary-container);
+    color: var(--md-on-surface);
+    border-color: transparent;
+}
+
+.control-btn:hover:not(.active) {
+    background: rgba(188, 199, 220, 0.08);
+}
+
+/* ─── MD3 カメラ選択ドロップダウン ──────────── */
+.control-select {
+    background: var(--md-surface-container-high);
+    border: 1px solid var(--md-outline);
+    color: var(--md-on-surface);
+    padding: 6px 12px;
+    border-radius: var(--md-shape-corner-full);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all var(--md-motion-standard);
+    max-width: 200px;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23918F9A' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+}
+
+.control-select:hover {
+    background-color: var(--md-surface-container-highest);
+    border-color: var(--md-primary);
+}
+
+.control-select:focus {
+    outline: none;
+    border-color: var(--md-primary);
+    box-shadow: 0 0 0 2px rgba(168, 199, 250, 0.2);
+}
+
+.control-select option {
+    background: var(--md-surface-container-high);
+    color: var(--md-on-surface);
+    padding: 8px;
+}
+
+/* ─── MD3 Filled Button（スタート/ストップ） ─── */
+.primary-btn {
+    width: 100%;
+    padding: 14px;
+    border-radius: var(--md-shape-corner-full);
+    border: none;
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all var(--md-motion-standard);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    letter-spacing: 0.02em;
+    box-shadow: var(--md-elevation-1);
+}
+
+.primary-btn:hover {
+    box-shadow: var(--md-elevation-2);
+    filter: brightness(1.08);
+}
+
+.primary-btn:active {
+    transform: scale(0.98);
+}
+
+.primary-btn.scanning {
+    background: var(--md-error);
+    color: #1A0000;
+}
+
+.action-bar {
+    margin-top: auto;
+    padding-top: 8px;
+    position: relative;
+    z-index: 50;
+}
+
+/* ─── ラベル検出 OK/NG 表示 ────────────────── */
+.label-result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: var(--md-shape-corner-m);
+    animation: slideIn 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.label-result.ok {
+    background: rgba(0, 200, 83, 0.12);
+    border: 1px solid rgba(0, 200, 83, 0.4);
+}
+
+.label-result.ng {
+    background: rgba(255, 59, 59, 0.12);
+    border: 1px solid rgba(255, 59, 59, 0.4);
+}
+
+.label-badge {
+    font-size: 1.1rem;
+    font-weight: 700;
+    padding: 4px 14px;
+    border-radius: var(--md-shape-corner-full);
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+}
+
+.label-badge.ok {
+    background: #00c853;
+    color: #003300;
+}
+
+.label-badge.ng {
+    background: #ff3b3b;
+    color: #1a0000;
+}
+
+.label-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.label-detail .timestamp {
+    font-size: 0.7rem;
+}
+
+.label-detail .reason {
+    font-size: 0.8rem;
+    color: var(--md-on-surface-variant);
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+/* ─── 結果パネル ────────────────────────────── */
+.result-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-right: 4px;
+}
+
+.result-item {
+    background: var(--md-surface-container-high);
+    padding: 12px 16px;
+    border-radius: var(--md-shape-corner-m);
+    font-size: 0.9rem;
+    animation: slideIn 0.25s cubic-bezier(0.2, 0, 0, 1);
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+}
+
+.timestamp {
+    color: var(--md-on-surface-variant);
+    font-size: 0.75rem;
+    margin-right: 8px;
+    font-family: 'Inter', monospace;
+    opacity: 0.7;
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.placeholder-text {
+    text-align: center;
+    color: var(--md-on-surface-variant);
+    margin-top: 50px;
+    opacity: 0.5;
+    font-size: 0.9rem;
+}
+
+/* ─── MD3 Text Button（クリア） ─────────────── */
+.clear-btn {
+    background: transparent;
+    border: none;
+    color: var(--md-primary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: var(--md-shape-corner-full);
+    transition: background var(--md-motion-standard);
+}
+
+.clear-btn:hover {
+    background: rgba(168, 199, 250, 0.08);
+}
+
+/* ─── 顔検出 感情カード ────────────────────── */
+.face-result {
+    background: var(--md-surface-container-high);
+    padding: 12px 16px;
+    border-radius: var(--md-shape-corner-m);
+    border-left: 3px solid #00bfff;
+    animation: slideIn 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.face-result .face-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.face-result .face-confidence {
+    font-size: 0.75rem;
+    color: #00bfff;
+    font-weight: 600;
+}
+
+.face-result .emotion-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+.face-result .emotion-item {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: var(--md-on-surface-variant);
+}
+
+.face-result .emotion-level {
+    font-weight: 500;
+}
+
+.face-result .emotion-level.high {
+    color: #FFB74D;
+}
+
+.face-result .emotion-level.very-high {
+    color: #ff7043;
+}
+
+/* ─── 分類タグ バッジ表示 ─────────────────── */
+.classify-result {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 0 0;
+}
+
+.classify-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--md-surface-container-highest);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-shape-corner-full);
+    padding: 4px 12px;
+    font-size: 0.8rem;
+    color: var(--md-on-surface);
+}
+
+.classify-tag .tag-score {
+    font-size: 0.7rem;
+    color: #81C784;
+    font-weight: 600;
+}
+
+/* ─── Web検索結果 ──────────────────────────── */
+.web-result {
+    background: var(--md-surface-container-high);
+    padding: 12px 16px;
+    border-radius: var(--md-shape-corner-m);
+    border-left: 3px solid #FFB74D;
+    animation: slideIn 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.web-result .web-section-title {
+    font-size: 0.75rem;
+    color: #FFB74D;
+    font-weight: 600;
+    margin-bottom: 6px;
+    margin-top: 10px;
+}
+
+.web-result .web-section-title:first-of-type {
+    margin-top: 0;
+}
+
+.web-result .web-best-guess {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--md-on-surface);
+    margin-bottom: 8px;
+}
+
+.web-result .web-entity {
+    font-size: 0.82rem;
+    color: var(--md-on-surface-variant);
+    padding: 2px 0;
+}
+
+.web-result .web-link {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--md-primary);
+    text-decoration: none;
+    padding: 3px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.web-result .web-link:hover {
+    text-decoration: underline;
+}
+
+/* ─── スクロールバー ────────────────────────── */
+::-webkit-scrollbar {
+    width: 4px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--md-outline-variant);
+    border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--md-outline);
+}
+
+/* ─── レスポンシブ対応（タブレット: 〜768px） ──── */
+@media (max-width: 768px) {
+    body {
+        height: auto;
+        overflow: auto;
+        padding: 8px;
+    }
+
+    .container {
+        height: auto;
+        width: 100%;
+    }
+
+    .main-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .video-container {
+        max-height: 65vh;
+    }
+
+    .result-panel {
+        min-height: 30vh;
+    }
+
+    header {
+        flex-direction: column;
+        gap: 8px;
+        text-align: center;
+    }
+
+    h1 {
+        font-size: 1.1rem;
+    }
+
+    .primary-btn {
+        padding: 12px;
+        font-size: 0.9rem;
+    }
+
+    .status-indicator {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    /* モードボタン: 2段 → 1段横スクロール */
+    .video-tools {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap;
+        border-radius: var(--md-shape-corner-m);
+        padding: 6px 8px;
+        max-width: 100%;
+    }
+
+    .video-tools::-webkit-scrollbar {
+        display: none;
+    }
+
+    .mode-switch-group {
+        flex-direction: row;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .mode-switch {
+        flex-shrink: 0;
+    }
+
+    /* タッチターゲット拡大（44px以上確保） */
+    .mode-btn {
+        padding: 8px 14px;
+        font-size: 0.8rem;
+    }
+
+    .tool-btn {
+        padding: 8px 14px;
+        font-size: 0.8rem;
+    }
+
+    .help-btn {
+        width: 36px;
+        height: 36px;
+        font-size: 0.9rem;
+    }
+
+    /* ヘルプポップアップ: 画面幅に応じて可変 */
+    .help-popup {
+        width: calc(100vw - 48px);
+        max-width: 300px;
+        right: 0;
+        left: 0;
+        margin: 0 auto;
+    }
+
+    /* ステータスバッジの縮小 */
+    .proxy-badge,
+    .api-counter,
+    .dup-skip-badge {
+        font-size: 0.7rem;
+        padding: 3px 8px;
+    }
+}
+
+/* ─── レスポンシブ対応（スマホ: 〜480px） ────── */
+@media (max-width: 480px) {
+    body {
+        padding: 4px;
+    }
+
+    .container {
+        gap: 8px;
+    }
+
+    header {
+        padding: 6px 12px;
+    }
+
+    h1 {
+        font-size: 1rem;
+    }
+
+    .panel {
+        padding: 10px;
+        gap: 8px;
+    }
+
+    .video-panel {
+        overflow: visible;
+    }
+
+    .primary-btn {
+        padding: 10px;
+        font-size: 0.85rem;
+    }
+
+    /* ヘルプポップアップ: ほぼ全幅 */
+    .help-popup {
+        width: calc(100vw - 24px);
+        bottom: 56px;
+    }
+
+    .help-popup-body {
+        max-height: 50vh;
+    }
+
+    /* ステータスバッジのさらなる縮小 */
+    .proxy-badge,
+    .api-counter,
+    .dup-skip-badge {
+        font-size: 0.65rem;
+        padding: 2px 6px;
+    }
+
+    #status-text {
+        font-size: 0.7rem;
+    }
+
+    /* 映像ツールバーのpadding縮小 */
+    .video-tools {
+        padding: 4px 6px;
+        gap: 6px;
+    }
+
+    .mode-btn {
+        padding: 7px 12px;
+        font-size: 0.75rem;
+    }
+
+    .tool-btn {
+        padding: 7px 10px;
+        font-size: 0.75rem;
+    }
+}

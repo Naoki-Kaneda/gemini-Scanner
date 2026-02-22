@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+# プロジェクトルートをPythonパスに追加（from app import app を解決するため）
+pythonpath = ["."]
+testpaths = ["tests"]
+# E2Eテストはマーカーで分離（通常テストから除外可能）
+markers = [
+    "e2e: E2Eテスト（Playwright必須）",
+]
+
+[tool.ruff]
+exclude = ["tests/e2e/*"]

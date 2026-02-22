@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Vision Scanner</title>
+    <meta name="description" content="Gemini AIによるリアルタイム画像解析Webアプリ">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600&family=Inter:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_hash('style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <!-- ヘッダー（MD3 Top App Bar風） -->
+        <header>
+            <h1>Gemini Vision Scanner</h1>
+            <div class="status-indicator">
+                <span id="btn-proxy" class="proxy-badge" title="プロキシ設定状態（実通信の成否ではありません）">Proxy設定: --</span>
+                <span id="api-counter" class="api-counter">API: 0/--</span>
+                <span id="dup-skip-badge" class="dup-skip-badge hidden" title="重複スキップ状態">--</span>
+                <span id="status-dot"></span>
+                <span id="status-text">準備完了</span>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <div class="main-grid">
+            <!-- 左パネル: 映像ソース -->
+            <div class="panel video-panel">
+                <div class="panel-header">
+                    <div class="controls">
+                        <button id="btn-camera" class="control-btn active">カメラ</button>
+                        <select id="camera-selector" class="control-select hidden"></select>
+                        <button id="btn-file" class="control-btn">ファイル</button>
+                        <input type="file" id="file-input" accept="video/*" class="hidden">
+                    </div>
+                </div>
+
+                <div class="video-container">
+                    <video id="video-feed" autoplay playsinline muted></video>
+                    <canvas id="overlay-canvas"></canvas>
+                    <div class="scan-overlay"></div>
+                    <div class="target-box"></div>
+                    <div id="stability-bar-container" class="stability-bar-container hidden">
+                        <div class="stability-bar-track">
+                            <div id="stability-bar-fill" class="stability-bar-fill"></div>
+                        </div>
+                        <div class="stability-help">カメラを静止させてください</div>
+                    </div>
+                    <div class="video-tools">
+                        <button id="btn-flip-cam" class="tool-btn hidden" title="インカメ/外カメ切替">⟳ 外カメ</button>
+                        <button id="btn-mirror" class="tool-btn" title="左右反転">↔ 反転</button>
+                        <div class="mode-switch-group">
+                            <div class="mode-switch">
+                                <button class="mode-btn active" id="mode-text">テキスト</button>
+                                <button class="mode-btn" id="mode-object">物体</button>
+                                <button class="mode-btn" id="mode-label">ラベル</button>
+                            </div>
+                            <div class="mode-switch">
+                                <button class="mode-btn" id="mode-face">顔</button>
+                                <button class="mode-btn" id="mode-logo">ロゴ</button>
+                                <button class="mode-btn" id="mode-classify">分類</button>
+                                <button class="mode-btn" id="mode-web">AI識別</button>
+                            </div>
+                        </div>
+                        <button id="btn-help" class="help-btn" title="モード説明">?</button>
+                    </div>
+                </div>
+
+                <!-- ヘルプポップアップ（video-containerの外に配置し、overflow:hiddenの影響を回避） -->
+                <div id="help-popup" class="help-popup hidden">
+                    <div class="help-popup-header">
+                        <span class="help-popup-title">モード説明</span>
+                        <button id="btn-help-close" class="help-popup-close">&times;</button>
+                    </div>
+                    <div class="help-popup-body">
+                        <div class="help-item">
+                            <span class="help-mode-badge text">テキスト</span>
+                            <p>カメラに映った文字を読み取ります（OCR）。書類、看板、名刺などのテキスト抽出に最適です。</p>
+                        </div>
+                        <div class="help-item">
+                            <span class="help-mode-badge object">物体</span>
+                            <p>映像内の物体を検出し、名前と位置を表示します。ボトル、箱、機器などを自動認識します。</p>
+                        </div>
+                        <div class="help-item">
+                            <span class="help-mode-badge label">ラベル</span>
+                            <p>ラベルの有無を判定します。テキストが読み取れれば <span class="help-ok">OK</span>、読み取れなければ <span class="help-ng">NG</span> と表示します。検査間隔は5秒です。</p>
+                        </div>
+                        <div class="help-item">
+                            <span class="help-mode-badge face">顔</span>
+                            <p>顔を検出し、表情（喜び・悲しみ・怒り・驚き）を分析します。複数の顔を同時に検出できます。</p>
+                        </div>
+                        <div class="help-item">
+                            <span class="help-mode-badge logo">ロゴ</span>
+                            <p>画像内のブランドロゴを検出し、名前とスコアを表示します。商品パッケージの確認に便利です。</p>
+                        </div>
+                        <div class="help-item">
+                            <span class="help-mode-badge classify">分類</span>
+                            <p>画像全体をAIが分類し、タグ付けします。「何が映っているか」を概要として把握できます。</p>
+                        </div>
+                        <div class="help-item">
+                            <span class="help-mode-badge web">AI識別</span>
+                            <p>画像をAIが識別し、推定名・関連キーワードを表示します。※Web検索は行いません。</p>
+                        </div>
+                    </div>
+                    <div class="help-settings">
+                        <div class="help-settings-title">設定</div>
+                        <div class="help-setting-item">
+                            <label for="duplicate-skip-count">重複スキップ回数</label>
+                            <div class="help-setting-control">
+                                <input type="range" id="duplicate-skip-count" min="1" max="5" value="2" step="1">
+                                <span id="duplicate-skip-value" class="help-setting-value">2回</span>
+                            </div>
+                            <p class="help-setting-desc">同じ内容を指定回数読み取ったら、カメラが動くまで一時停止します。</p>
+                        </div>
+                    </div>
+                    <div class="help-version">
+                        Gemini Vision Scanner v{{ app_version }}
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button id="btn-scan" class="primary-btn">
+                        <span class="icon">▶</span> スタート
+                    </button>
+                </div>
+
+                <!-- キャプチャ用非表示キャンバス -->
+                <canvas id="capture-canvas" class="hidden"></canvas>
+            </div>
+
+            <!-- 右パネル: 検出結果 -->
+            <div class="panel result-panel">
+                <div class="panel-header">
+                    <h2>検出結果</h2>
+                    <button id="btn-clear" class="clear-btn">クリア</button>
+                </div>
+                <div id="result-list" class="result-list">
+                    <div class="placeholder-text">スキャンして検出を開始...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}?v={{ static_hash('script.js') }}"></script>
+</body>
+
+</html>
