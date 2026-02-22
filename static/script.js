@@ -850,8 +850,15 @@ async function captureAndAnalyze() {
             return;
         }
 
-        // サーバー側レート制限: Retry-After ヘッダーからクールダウン秒数を取得
+        // サーバー側レート制限: 種別に応じたUI制御
         if (response.status === 429) {
+            if (result.limit_type === 'daily') {
+                // RPD（日次制限）: 翌日まで復旧しないためボタンを永続無効化
+                if (statusText) statusText.textContent = `⚠ ${result.message || '本日のAPI上限に達しました'}`;
+                disableScanButton('本日の上限に到達');
+                return;
+            }
+            // RPM（分制限）: クールダウン後に自動復帰
             const retryAfter = parseInt(response.headers.get('Retry-After') || '10', 10);
             if (statusText) statusText.textContent = `⚠ ${result.message || 'リクエスト制限中'}`;
             startCooldownCountdown(retryAfter);

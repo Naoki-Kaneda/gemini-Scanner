@@ -477,13 +477,20 @@ def analyze_endpoint():
         rate_key = client_ip
     limited, limit_message, request_id = try_consume_request(rate_key)
     if limited:
-        _log("info", "rate_limited", ip=client_ip, reason=limit_message)
-        # "daily" を含む場合は長めの待機、分制限は短めの待機をクライアントに通知
-        retry_after = "60" if "日" in limit_message else "10"
-        return _error_response(
-            ERR_RATE_LIMITED, limit_message, 429,
-            headers={"Retry-After": retry_after},
-        )
+        is_daily = "日" in limit_message
+        _log("info", "rate_limited", ip=client_ip, reason=limit_message,
+             limit_type="daily" if is_daily else "minute")
+        # 日次制限は長めの待機、分制限は短めの待機をクライアントに通知
+        retry_after = "60" if is_daily else "10"
+        response = jsonify({
+            "ok": False,
+            "data": [],
+            "error_code": ERR_RATE_LIMITED,
+            "message": limit_message,
+            "limit_type": "daily" if is_daily else "minute",
+        })
+        response.headers["Retry-After"] = retry_after
+        return response, 429
 
     # ─── Gemini API呼び出し ─────────────
     try:
