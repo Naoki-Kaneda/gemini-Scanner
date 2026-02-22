@@ -254,14 +254,18 @@ def handle_method_not_allowed(_e):
 
 
 # ─── レスポンスヘルパー ────────────────────────────
-def _error_response(error_code, message, status_code=400):
-    """標準化されたエラーレスポンスを生成する。"""
-    return jsonify({
+def _error_response(error_code, message, status_code=400, headers=None):
+    """標準化されたエラーレスポンスを生成する。headersで追加HTTPヘッダーを指定可能。"""
+    response = jsonify({
         "ok": False,
         "data": [],
         "error_code": error_code,
         "message": message,
-    }), status_code
+    })
+    if headers:
+        for key, value in headers.items():
+            response.headers[key] = value
+    return response, status_code
 
 
 def _log(level, event, **kwargs):
@@ -474,7 +478,12 @@ def analyze_endpoint():
     limited, limit_message, request_id = try_consume_request(rate_key)
     if limited:
         _log("info", "rate_limited", ip=client_ip, reason=limit_message)
-        return _error_response(ERR_RATE_LIMITED, limit_message, 429)
+        # "daily" を含む場合は長めの待機、分制限は短めの待機をクライアントに通知
+        retry_after = "60" if "日" in limit_message else "10"
+        return _error_response(
+            ERR_RATE_LIMITED, limit_message, 429,
+            headers={"Retry-After": retry_after},
+        )
 
     # ─── Gemini API呼び出し ─────────────
     try:
@@ -486,8 +495,11 @@ def analyze_endpoint():
 
         release_request(rate_key, request_id)
         _log("warning", "api_failure", ip=client_ip, mode=mode, error_code=result["error_code"])
-        status_code = 429 if result.get("error_code") == "GEMINI_RATE_LIMITED" else 502
-        return jsonify(result), status_code
+        if result.get("error_code") == "GEMINI_RATE_LIMITED":
+            response = jsonify(result)
+            response.headers["Retry-After"] = "30"
+            return response, 429
+        return jsonify(result), 502
 
     except ValueError as e:
         release_request(rate_key, request_id)

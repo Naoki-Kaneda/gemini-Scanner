@@ -346,6 +346,11 @@ video {
     transition: width 0.05s linear;
 }
 
+.stability-bar-fill.cooldown {
+    background: #FFA726;
+    transition: width 1s linear;
+}
+
 .stability-help {
     color: var(--md-on-surface);
     font-size: 0.75rem;

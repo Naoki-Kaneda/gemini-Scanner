@@ -74,6 +74,8 @@ let currentMode = 'text';
 let isMirrored = false;
 let isPausedByError = false;  // エラーによる一時停止状態
 let retryTimerId = null;      // 再試行用タイマーID
+let cooldownTimerId = null;   // レート制限クールダウンタイマーID
+let cooldownRemaining = 0;    // クールダウン残り秒数（0 = クールダウン中でない）
 let isAnalyzing = false;      // API呼び出し中フラグ（並行呼び出し防止）
 let lastResultFingerprint = null;    // 直前のAPI結果の指紋（重複検出用）
 let duplicateCount = 0;              // 同じ結果の連続回数
@@ -488,6 +490,13 @@ function toggleScanning() {
     const now = Date.now();
     if (now - lastToggleTime < 800) return;
     if (isAnalyzing) return; // 解析中（API応答待ち）はトグル無効
+    // クールダウン中: ボタンを押してもスキャン開始せず、残り秒数をフィードバック
+    if (cooldownRemaining > 0) {
+        if (statusText) {
+            statusText.textContent = `⏳ クールダウン中です。あと${cooldownRemaining}秒お待ちください`;
+        }
+        return;
+    }
     lastToggleTime = now;
     // isScanning または isPausedByError（エラー再試行待ち）なら停止
     (isScanning || isPausedByError) ? stopScanning() : startScanning();
@@ -542,6 +551,8 @@ function stopScanning() {
         clearTimeout(retryTimerId);
         retryTimerId = null;
     }
+    // レート制限クールダウン中なら停止（ボタンやバーの復帰も含む）
+    stopCooldownCountdown();
     clearOverlay();
     // XSS対策: DOM操作でボタン内容を更新（innerHTML不使用）
     _setBtnScanContent('▶', 'スタート');
@@ -816,9 +827,11 @@ async function captureAndAnalyze() {
             return;
         }
 
-        // サーバー側レート制限
+        // サーバー側レート制限: Retry-After ヘッダーからクールダウン秒数を取得
         if (response.status === 429) {
+            const retryAfter = parseInt(response.headers.get('Retry-After') || '10', 10);
             if (statusText) statusText.textContent = `⚠ ${result.message || 'リクエスト制限中'}`;
+            startCooldownCountdown(retryAfter);
             return;
         }
 
@@ -921,6 +934,70 @@ function scheduleRetry() {
             requestAnimationFrame(scanLoop);
         }
     }, RETRY_DELAY_MS);
+}
+
+/**
+ * レート制限クールダウンのカウントダウンを表示する。
+ * スキャンボタンを無効化し、安定化バーで残り時間を可視化する。
+ * @param {number} seconds - クールダウン秒数（Retry-After ヘッダー値）
+ */
+function startCooldownCountdown(seconds) {
+    // 既存のカウントダウンがあればクリア（連続429対応）
+    stopCooldownCountdown();
+
+    const totalSeconds = seconds;
+    cooldownRemaining = seconds;
+
+    // スキャンボタンを無効化してクールダウン中を明示
+    if (btnScan) {
+        btnScan.disabled = true;
+        btnScan.style.opacity = '0.5';
+        btnScan.style.cursor = 'not-allowed';
+    }
+
+    // 安定化バーをクールダウン進捗に転用（オレンジ色で100%→0%）
+    if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
+    if (stabilityBarFill) {
+        stabilityBarFill.classList.remove('captured');
+        stabilityBarFill.classList.add('cooldown');
+        stabilityBarFill.style.width = '100%';
+    }
+
+    cooldownTimerId = setInterval(() => {
+        cooldownRemaining--;
+        if (cooldownRemaining <= 0) {
+            stopCooldownCountdown();
+            if (statusText) statusText.textContent = '準備完了 ― スタートで再スキャン';
+        } else {
+            // 進捗バーを減少（100% → 0%）
+            const progress = (cooldownRemaining / totalSeconds) * 100;
+            if (stabilityBarFill) stabilityBarFill.style.width = progress + '%';
+            if (statusText) statusText.textContent = `⏳ リクエスト制限中... あと${cooldownRemaining}秒`;
+        }
+    }, 1000);
+}
+
+/** クールダウンカウントダウンを停止し、UIを復帰する。 */
+function stopCooldownCountdown() {
+    if (cooldownTimerId) {
+        clearInterval(cooldownTimerId);
+        cooldownTimerId = null;
+    }
+    cooldownRemaining = 0;
+
+    // スキャンボタンを復帰
+    if (btnScan) {
+        btnScan.disabled = false;
+        btnScan.style.opacity = '';
+        btnScan.style.cursor = '';
+    }
+
+    // 安定化バーをリセット
+    if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
+    if (stabilityBarFill) {
+        stabilityBarFill.classList.remove('cooldown');
+        stabilityBarFill.style.width = '0%';
+    }
 }
 
 
