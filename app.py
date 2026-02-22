@@ -194,11 +194,8 @@ def add_security_headers(response):
             response.headers["Access-Control-Allow-Headers"] = "Content-Type"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         # CDN/プロキシが異なるOrigin向けレスポンスを混在キャッシュしないよう Vary を付与
-        # 既存の Vary 値（例: Accept-Encoding）を保持して Origin を追記
-        existing_vary = response.headers.get("Vary", "")
-        if "Origin" not in existing_vary:
-            new_vary = f"{existing_vary}, Origin" if existing_vary else "Origin"
-            response.headers["Vary"] = new_vary
+        # Werkzeug の HeaderSet で既存値を保持しつつ Origin を追記（重複自動排除）
+        response.vary.add("Origin")
 
     return response
 
