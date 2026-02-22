@@ -3,7 +3,6 @@ Gemini Vision Scanner - APIエンドポイントのテスト。
 正常系（OCR/物体検出）、不正入力、API失敗時、セキュリティ、エラーハンドラの6系統をカバー。
 """
 
-import os
 import base64
 from unittest.mock import patch
 from conftest import create_valid_image_base64, create_valid_png_base64

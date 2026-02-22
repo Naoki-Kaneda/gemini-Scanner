@@ -5,7 +5,7 @@ Gemini API固有のエラー（SAFETY等）・タイムアウト・接続失敗�
 
 import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from requests.exceptions import Timeout, ConnectionError as RequestsConnectionError, RequestException
 from conftest import make_b64, make_mock_response, create_valid_png_base64
 

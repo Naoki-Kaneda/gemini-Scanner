@@ -37,7 +37,15 @@ MAX_IMAGE_SIZE = 5 * 1024 * 1024          # 5MB（Base64デコード後）
 MAX_REQUEST_BODY = 10 * 1024 * 1024       # 10MB（Base64 + JSONオーバーヘッド）
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")  # 管理API認証用シークレット
 # レート制限キー方式: "ip_ua"=IP+UserAgent複合キー, "ip"=IPのみ
-RATE_LIMIT_KEY_MODE = os.getenv("RATE_LIMIT_KEY_MODE", "ip_ua").lower()
+_VALID_KEY_MODES = {"ip_ua", "ip"}
+_raw_key_mode = os.getenv("RATE_LIMIT_KEY_MODE", "ip_ua").lower()
+if _raw_key_mode not in _VALID_KEY_MODES:
+    logging.getLogger(__name__).warning(
+        "RATE_LIMIT_KEY_MODE=%r は無効です（有効値: %s）。デフォルト ip_ua を使用します。",
+        _raw_key_mode, ", ".join(sorted(_VALID_KEY_MODES)),
+    )
+    _raw_key_mode = "ip_ua"
+RATE_LIMIT_KEY_MODE = _raw_key_mode
 
 # ─── エラーコード定数（タイポ防止） ────────────────────
 ERR_INVALID_FORMAT = "INVALID_FORMAT"
