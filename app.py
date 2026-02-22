@@ -33,6 +33,7 @@ logging.getLogger("werkzeug").setLevel(logging.INFO)
 
 APP_VERSION = "2.0.0"                     # テンプレートに自動注入される
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+APP_PORT = int(os.getenv("APP_PORT", "5000"))  # 同一サーバー共存時に変更可能
 MAX_IMAGE_SIZE = 5 * 1024 * 1024          # 5MB（Base64デコード後）
 MAX_REQUEST_BODY = 10 * 1024 * 1024       # 10MB（Base64 + JSONオーバーヘッド）
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")  # 管理API認証用シークレット
@@ -494,7 +495,7 @@ if __name__ == "__main__":
     ssl_key = os.environ.get("SSL_KEY_PATH")
     if ssl_cert and ssl_key:
         logger.info("HTTPS モードで起動 (証明書: %s)", ssl_cert)
-        app.run(debug=FLASK_DEBUG, host="0.0.0.0", port=5000,
+        app.run(debug=FLASK_DEBUG, host="0.0.0.0", port=APP_PORT,
                 ssl_context=(ssl_cert, ssl_key))
     else:
-        app.run(debug=FLASK_DEBUG, port=5000)
+        app.run(debug=FLASK_DEBUG, port=APP_PORT)
