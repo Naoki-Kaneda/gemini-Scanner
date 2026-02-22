@@ -420,29 +420,35 @@ def update_proxy_config():
 
 def _validate_analyze_request():
     """
-    /api/analyze のリクエストを検証し、画像データとモードを返す。
+    /api/analyze のリクエストを検証し、画像データ・モード・ヒントを返す。
 
     Returns:
-        tuple: (image_data, mode, None) 成功時
-               (None, None, error_response) 失敗時
+        tuple: (image_data, mode, hint, None) 成功時
+               (None, None, None, error_response) 失敗時
     """
     if not request.is_json:
-        return None, None, _error_response(ERR_INVALID_FORMAT, "リクエストはJSON形式である必要があります")
+        return None, None, None, _error_response(ERR_INVALID_FORMAT, "リクエストはJSON形式である必要があります")
 
     data = request.get_json(silent=True)
     if data is None:
-        return None, None, _error_response(ERR_INVALID_FORMAT, "JSONのパースに失敗しました")
+        return None, None, None, _error_response(ERR_INVALID_FORMAT, "JSONのパースに失敗しました")
 
     if not isinstance(data, dict):
-        return None, None, _error_response(ERR_INVALID_FORMAT, "リクエストボディはJSONオブジェクトである必要があります")
+        return None, None, None, _error_response(ERR_INVALID_FORMAT, "リクエストボディはJSONオブジェクトである必要があります")
 
     image_data = data.get("image")
     if not image_data or not isinstance(image_data, str) or not image_data.strip():
-        return None, None, _error_response(ERR_MISSING_IMAGE, "画像データがありません")
+        return None, None, None, _error_response(ERR_MISSING_IMAGE, "画像データがありません")
 
     mode = data.get("mode", "text")
     if mode not in VALID_MODES:
-        return None, None, _error_response(ERR_INVALID_MODE, f"不正なモード: '{mode}'。許可値: {list(VALID_MODES)}")
+        return None, None, None, _error_response(ERR_INVALID_MODE, f"不正なモード: '{mode}'。許可値: {list(VALID_MODES)}")
+
+    # キーワードヒント（任意）: 制御文字を除去し200文字に制限
+    hint = data.get("hint", "")
+    if not isinstance(hint, str):
+        hint = ""
+    hint = "".join(c for c in hint if c.isprintable()).strip()[:200]
 
     # data:image/jpeg;base64, プレフィックスを除去
     if "," in image_data:
@@ -452,20 +458,20 @@ def _validate_analyze_request():
     try:
         decoded = base64.b64decode(image_data, validate=True)
         if len(decoded) > MAX_IMAGE_SIZE:
-            return None, None, _error_response(
+            return None, None, None, _error_response(
                 ERR_IMAGE_TOO_LARGE,
                 f"画像サイズが上限({MAX_IMAGE_SIZE // (1024*1024)}MB)を超えています",
             )
         # MIME magic byte 検証（JPEG/PNGのみ許可）
         if not _validate_image_format(decoded):
-            return None, None, _error_response(
+            return None, None, None, _error_response(
                 ERR_INVALID_IMAGE_FORMAT,
                 "許可されていない画像形式です（JPEG/PNGのみ対応）",
             )
     except Exception:
-        return None, None, _error_response(ERR_INVALID_BASE64, "画像データのBase64デコードに失敗しました")
+        return None, None, None, _error_response(ERR_INVALID_BASE64, "画像データのBase64デコードに失敗しました")
 
-    return image_data, mode, None
+    return image_data, mode, hint, None
 
 
 @app.route("/api/analyze", methods=["OPTIONS"])
@@ -495,7 +501,7 @@ def analyze_endpoint():
         message: エラーメッセージ（エラー時のみ）
     """
     # ─── リクエスト検証 ─────────────────
-    image_data, mode, validation_error = _validate_analyze_request()
+    image_data, mode, hint, validation_error = _validate_analyze_request()
     if validation_error:
         return validation_error
 
@@ -520,7 +526,7 @@ def analyze_endpoint():
 
     # ─── Gemini API呼び出し ─────────────
     try:
-        result = detect_content(image_data, mode, request_id=g.request_id)
+        result = detect_content(image_data, mode, request_id=g.request_id, context_hint=hint)
 
         if result["ok"]:
             _log("info", "api_success", ip=client_ip, mode=mode, items=len(result["data"]))

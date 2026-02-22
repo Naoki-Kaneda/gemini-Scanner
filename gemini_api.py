@@ -503,17 +503,23 @@ def _ensure_jpeg(image_b64, enhance=False):
 
 
 # ─── Gemini APIペイロード構築 ────────────────────────
-def _build_gemini_payload(image_b64, mode):
+def _build_gemini_payload(image_b64, mode, context_hint=""):
     """
     Gemini APIリクエスト用のペイロードを構築する。
 
     Args:
         image_b64: Base64エンコードされた画像文字列
         mode: 検出モード
+        context_hint: ユーザーが入力した追加コンテキスト（任意）
 
     Returns:
         dict: Gemini API用のリクエストペイロード
     """
+    # ヒントが提供されていればプロンプトの末尾に追加コンテキストとして連結
+    prompt = MODE_PROMPTS[mode]
+    if context_hint:
+        prompt += f"\n\n追加コンテキスト: {context_hint}"
+
     payload = {
         "contents": [
             {
@@ -525,7 +531,7 @@ def _build_gemini_payload(image_b64, mode):
                         }
                     },
                     {
-                        "text": MODE_PROMPTS[mode],
+                        "text": prompt,
                     },
                 ]
             }
@@ -543,7 +549,7 @@ def _build_gemini_payload(image_b64, mode):
 
 
 # ─── API呼び出し ──────────────────────────────────
-def detect_content(image_b64, mode="text", request_id=""):
+def detect_content(image_b64, mode="text", request_id="", context_hint=""):
     """
     Google Gemini APIで画像解析を行う。
 
@@ -558,6 +564,7 @@ def detect_content(image_b64, mode="text", request_id=""):
             - 'classify': 画像分類タグ
             - 'web': AI画像識別
         request_id: リクエスト相関ID（ログ追跡用、省略可）。
+        context_hint: ユーザーが入力した追加コンテキスト（任意、省略可）。
 
     Returns:
         dict: {
@@ -591,7 +598,7 @@ def detect_content(image_b64, mode="text", request_id=""):
         logger.warning("画像前処理をスキップ: %s", e)
 
     # Gemini APIリクエストペイロード構築
-    payload = _build_gemini_payload(image_b64, mode)
+    payload = _build_gemini_payload(image_b64, mode, context_hint=context_hint)
 
     # Gemini APIエンドポイント
     api_url = f"{API_BASE_URL}{GEMINI_MODEL}:generateContent"

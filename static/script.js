@@ -37,6 +37,32 @@ const MODE_IMAGE_CONFIG = {
     classify: { maxWidth: 640,  quality: 0.80 },  // 分類: 低解像度で十分
     web:      { maxWidth: 640,  quality: 0.80 },  // Web検索: 低解像度で十分
 };
+
+/**
+ * ネットワーク品質に基づいて画像リサイズの倍率を返す。
+ * Network Information API で接続状態を判定し、低速回線時は画像サイズ・品質を下げる。
+ * API非対応ブラウザ（Safari/Firefox）では倍率1.0を返す（プログレッシブエンハンスメント）。
+ */
+function getNetworkQualityMultiplier() {
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (!conn) return { widthMultiplier: 1.0, qualityMultiplier: 1.0 };
+
+    // save-data が有効 → ユーザーが明示的にデータ節約を要求
+    if (conn.saveData) return { widthMultiplier: 0.5, qualityMultiplier: 0.6 };
+
+    // effectiveType に基づく段階的な品質調整
+    switch (conn.effectiveType) {
+        case 'slow-2g':
+        case '2g':
+            return { widthMultiplier: 0.5, qualityMultiplier: 0.5 };
+        case '3g':
+            return { widthMultiplier: 0.7, qualityMultiplier: 0.7 };
+        case '4g':
+        default:
+            return { widthMultiplier: 1.0, qualityMultiplier: 1.0 };
+    }
+}
+
 const MIN_RESULT_LENGTH = 5;         // 結果フィルター: 最小文字数
 const LABEL_MAX_LENGTH = 25;         // バウンディングボックスのラベル最大文字数
 const RETRY_DELAY_MS = 10000;        // エラー後の再試行待機時間（ミリ秒）
@@ -73,6 +99,38 @@ function fetchSignal(ms = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), ms);
     return controller.signal;
+}
+
+/**
+ * リトライ付き fetch。ネットワークエラー時に指数バックオフで再試行する。
+ * - AbortError（タイムアウト）は再試行せず即座にスロー
+ * - HTTPレスポンス（429含む）は成功扱いで返却（呼び出し元で処理）
+ * - 各試行で新しいAbortSignalを生成（前回のタイムアウト残留を防止）
+ */
+async function fetchWithRetry(url, options, maxRetries = 3, baseDelay = 2000) {
+    let lastError;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await fetch(url, { ...options, signal: fetchSignal() });
+        } catch (err) {
+            lastError = err;
+            // タイムアウトは再試行しない
+            if (err.name === 'AbortError') throw err;
+            // 最終試行なら諦めてスロー
+            if (attempt >= maxRetries) {
+                err._retriesExhausted = true;
+                throw err;
+            }
+            // 指数バックオフ: 2s → 4s → 8s
+            const delay = baseDelay * Math.pow(2, attempt);
+            if (statusText) {
+                statusText.textContent = `⚠ 通信エラー — 再試行中 (${attempt + 1}/${maxRetries})...`;
+            }
+            console.warn(`通信エラー (試行 ${attempt + 1}/${maxRetries + 1}): ${err.message}。${delay}ms後に再試行`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+    throw lastError;
 }
 
 // ─── DOM要素の参照（init() で DOMContentLoaded 後に取得） ────
@@ -886,10 +944,20 @@ async function captureAndAnalyze() {
 
     // モード別に送信画像をリサイズ（通信量・トークン消費削減）
     const imgConfig = MODE_IMAGE_CONFIG[currentMode] || MODE_IMAGE_CONFIG.text;
+    const netQ = getNetworkQualityMultiplier();
+
+    // ネットワーク品質に応じた実効maxWidthを計算
+    let effectiveMaxWidth = imgConfig.maxWidth;
+    if (netQ.widthMultiplier < 1.0) {
+        effectiveMaxWidth = effectiveMaxWidth
+            ? Math.round(effectiveMaxWidth * netQ.widthMultiplier)   // 既存上限にネットワーク倍率を適用
+            : Math.round(srcW * netQ.widthMultiplier);               // text/label: 低速時のみ元幅の倍率分に制限
+    }
+
     let dstW = srcW;
     let dstH = srcH;
-    if (imgConfig.maxWidth && srcW > imgConfig.maxWidth) {
-        const scale = imgConfig.maxWidth / srcW;
+    if (effectiveMaxWidth && srcW > effectiveMaxWidth) {
+        const scale = effectiveMaxWidth / srcW;
         dstW = Math.round(srcW * scale);
         dstH = Math.round(srcH * scale);
     }
@@ -915,7 +983,8 @@ async function captureAndAnalyze() {
         }
     }
 
-    const imageData = canvas.toDataURL('image/jpeg', imgConfig.quality);
+    const effectiveQuality = Math.max(0.3, imgConfig.quality * netQ.qualityMultiplier);
+    const imageData = canvas.toDataURL('image/jpeg', effectiveQuality);
 
     // シングルショット: キャプチャ完了後、スキャンループを停止して解析待機状態に遷移
     isScanning = false;
@@ -928,11 +997,17 @@ async function captureAndAnalyze() {
     let succeeded = false;
 
     try {
-        const response = await fetch('/api/analyze', {
+        // キーワードヒント: 入力欄の値をAPIリクエストに含める（空なら省略）
+        const hintEl = document.getElementById('context-hint');
+        const hint = hintEl ? hintEl.value.trim().slice(0, 200) : '';
+        const response = await fetchWithRetry('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: imageData, mode: currentMode }),
-            signal: fetchSignal(),
+            body: JSON.stringify({
+                image: imageData,
+                mode: currentMode,
+                ...(hint && { hint }),
+            }),
         });
 
         // JSONパース失敗に備えた安全なパース（413等でHTML応答の場合）
@@ -1021,9 +1096,13 @@ async function captureAndAnalyze() {
         }
     } catch (err) {
         if (statusText) {
-            statusText.textContent = err.name === 'AbortError'
-                ? '⚠ タイムアウト（応答に時間がかかりすぎました）'
-                : '⚠ 通信エラー';
+            if (err.name === 'AbortError') {
+                statusText.textContent = '⚠ タイムアウト（応答に時間がかかりすぎました）';
+            } else if (err._retriesExhausted) {
+                statusText.textContent = '⚠ 通信エラー（再試行失敗 — ネットワークを確認してください）';
+            } else {
+                statusText.textContent = '⚠ 通信エラー';
+            }
         }
         console.error('通信エラー:', err);
     } finally {
