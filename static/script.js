@@ -204,7 +204,8 @@ function updateApiCounter() {
     // 既定ではボタンロックを行わない（サーバー側のレート制限を信頼）
     if (ENFORCE_CLIENT_DAILY_LIMIT && apiCallCount >= API_DAILY_LIMIT) {
         disableScanButton('API上限（本日分）');
-    } else if (btnScan) {
+    } else if (btnScan && !isAnalyzing) {
+        // 解析中（API応答待ち）はdisabled状態を維持する
         btnScan.disabled = false;
         btnScan.style.opacity = '';
         btnScan.style.cursor = '';
@@ -763,13 +764,13 @@ async function captureAndAnalyze() {
         try {
             result = await response.json();
         } catch {
-            statusText.textContent = `⚠ サーバーエラー (${response.status})`;
+            if (statusText) statusText.textContent = `⚠ サーバーエラー (${response.status})`;
             return;
         }
 
         // サーバー側レート制限
         if (response.status === 429) {
-            statusText.textContent = `⚠ ${result.message || 'リクエスト制限中'}`;
+            if (statusText) statusText.textContent = `⚠ ${result.message || 'リクエスト制限中'}`;
             return;
         }
 
@@ -829,11 +830,15 @@ async function captureAndAnalyze() {
                 .forEach(addResultItem);
         } else if (!result.ok) {
             const errorMsg = result.message || `サーバーエラー (${result.error_code})`;
-            statusText.textContent = `⚠ ${errorMsg}`;
+            if (statusText) statusText.textContent = `⚠ ${errorMsg}`;
             console.error(`APIエラー [${result.error_code}]:`, result.message);
         }
     } catch (err) {
-        statusText.textContent = '⚠ 通信エラー';
+        if (statusText) {
+            statusText.textContent = err.name === 'AbortError'
+                ? '⚠ タイムアウト（応答に時間がかかりすぎました）'
+                : '⚠ 通信エラー';
+        }
         console.error('通信エラー:', err);
     } finally {
         isAnalyzing = false;
@@ -1403,9 +1408,12 @@ function init() {
         });
     }
 
-    // 画面離脱時にカメラを確実に解放する（LED点灯残り防止）
+    // 画面離脱時にカメラとスキャンを停止（LED点灯残り + API誤発火防止）
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden) stopCameraStream();
+        if (document.hidden) {
+            if (isScanning) stopScanning();
+            stopCameraStream();
+        }
     });
 
     setupCamera();

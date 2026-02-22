@@ -248,7 +248,7 @@ MODE_SCHEMAS = {
     },
 }
 
-API_TIMEOUT_SECONDS = 30  # Geminiは生成AIのため、Vision APIより長めに設定
+API_TIMEOUT_SECONDS = 10  # Retry3回+backoff合計 = 最大43.5秒 < フロントfetch45秒
 
 # ─── エラーコード定数（タイポ防止） ─────────────────────
 ERR_TIMEOUT = "TIMEOUT"
@@ -339,6 +339,24 @@ session.verify = VERIFY_SSL
 
 
 # ─── 座標変換ユーティリティ ─────────────────────────
+def _clamp(value, min_val, max_val):
+    """値を [min_val, max_val] の範囲にクランプする。"""
+    return max(min_val, min(max_val, value))
+
+
+def _sanitize_box_2d(box_2d):
+    """box_2d を 0-1000 範囲にクランプし、反転ボックスを修正する。"""
+    if not box_2d or len(box_2d) != 4:
+        return None
+    y_min, x_min, y_max, x_max = [_clamp(v, 0, 1000) for v in box_2d]
+    # 反転ボックスの修正（Geminiが稀にmin/maxを逆に返す場合）
+    if y_min > y_max:
+        y_min, y_max = y_max, y_min
+    if x_min > x_max:
+        x_min, x_max = x_max, x_min
+    return y_min, x_min, y_max, x_max
+
+
 def _gemini_box_to_pixel_vertices(box_2d, img_width, img_height):
     """
     Gemini box_2d [y_min, x_min, y_max, x_max] (0-1000) → ピクセル座標4頂点。
@@ -351,9 +369,10 @@ def _gemini_box_to_pixel_vertices(box_2d, img_width, img_height):
     Returns:
         [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] ピクセル座標（左上→右上→右下→左下）
     """
-    if not box_2d or len(box_2d) != 4:
+    sanitized = _sanitize_box_2d(box_2d)
+    if not sanitized:
         return []
-    y_min, x_min, y_max, x_max = box_2d
+    y_min, x_min, y_max, x_max = sanitized
     px_x_min = int((x_min / 1000) * img_width)
     px_y_min = int((y_min / 1000) * img_height)
     px_x_max = int((x_max / 1000) * img_width)
@@ -376,9 +395,10 @@ def _gemini_box_to_normalized_vertices(box_2d):
     Returns:
         [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] 正規化座標（左上→右上→右下→左下）
     """
-    if not box_2d or len(box_2d) != 4:
+    sanitized = _sanitize_box_2d(box_2d)
+    if not sanitized:
         return []
-    y_min, x_min, y_max, x_max = box_2d
+    y_min, x_min, y_max, x_max = sanitized
     nx_min = x_min / 1000
     ny_min = y_min / 1000
     nx_max = x_max / 1000
@@ -594,6 +614,9 @@ def detect_content(image_b64, mode="text", request_id=""):
         if finish_reason == "SAFETY":
             logger.warning("[%s] Gemini: 安全フィルターにより停止 (mode=%s)", request_id, mode)
             return _make_error(ERR_SAFETY_BLOCKED, "画像が安全フィルターによりブロックされました")
+        if finish_reason in ("MAX_TOKENS", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"):
+            logger.warning("[%s] Gemini: 異常終了 finishReason=%s (mode=%s)", request_id, finish_reason, mode)
+            return _make_error("INCOMPLETE_RESPONSE", f"応答が不完全です (理由: {finish_reason})")
 
         # テキスト部分を取得
         parts = candidate.get("content", {}).get("parts", [])

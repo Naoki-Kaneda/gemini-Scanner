@@ -59,8 +59,7 @@ body {
     font-family: 'Inter', 'Noto Sans JP', sans-serif;
     background-color: var(--md-surface);
     color: var(--md-on-surface);
-    height: 100dvh;  /* モバイルブラウザのUIバー考慮（フォールバック: 100vh） */
-    height: 100vh;
+    height: 100vh;   /* フォールバック（dvh非対応ブラウザ用） */
     overflow: hidden;
     display: flex;
     justify-content: center;
@@ -69,11 +68,12 @@ body {
 
 @supports (height: 100dvh) {
     body { height: 100dvh; }
+    .container { height: 92dvh; }
 }
 
 .container {
     width: 95%;
-    height: 92vh;
+    height: 92vh;   /* フォールバック（dvh非対応ブラウザ用） */
     max-width: 1400px;
     display: flex;
     flex-direction: column;
@@ -757,6 +757,15 @@ video {
 .primary-btn.scanning {
     background: var(--md-error);
     color: #1A0000;
+}
+
+.primary-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: none;
+    transform: none;
+    box-shadow: none;
+    animation: none;
 }
 
 .action-bar {
