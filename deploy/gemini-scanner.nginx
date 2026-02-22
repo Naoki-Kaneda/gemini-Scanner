@@ -1,0 +1,42 @@
+# Gemini Vision Scanner - nginx 設定
+# HTTPS (自己署名SSL, ポート8443) → gunicorn リバースプロキシ
+# ※ ポート443はVision AI Scannerが使用するため8443で共存
+
+# HTTPS サーバー（8443ポート）
+server {
+    listen 8443 ssl;
+    server_name _;
+
+    # SSL証明書（セットアップスクリプトが自動生成）
+    ssl_certificate     __SSL_DIR__/__APP_NAME__.crt;
+    ssl_certificate_key __SSL_DIR__/__APP_NAME__.key;
+
+    # SSL設定（TLS 1.2以上のみ許可）
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # リクエストサイズ上限（画像アップロード用）
+    client_max_body_size 10M;
+
+    # 静的ファイル（nginx が直接配信）
+    location /static/ {
+        alias __APP_DIR__/static/;
+        expires 1d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # アプリケーション（gunicorn にプロキシ）
+    location / {
+        proxy_pass http://127.0.0.1:__PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # タイムアウト設定（Gemini API呼び出しを考慮）
+        proxy_connect_timeout 30s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 30s;
+    }
+}

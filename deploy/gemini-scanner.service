@@ -1,0 +1,26 @@
+# Gemini Vision Scanner - systemd サービス定義
+# gunicorn で Flask アプリを起動する
+
+[Unit]
+Description=Gemini Vision Scanner (gunicorn)
+After=network.target
+
+[Service]
+Type=notify
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_DIR__
+Environment="PATH=__APP_DIR__/venv/bin:/usr/bin"
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=__APP_DIR__/venv/bin/gunicorn app:app \
+    --bind 127.0.0.1:__PORT__ \
+    --workers __WORKERS__ \
+    --timeout 60 \
+    --access-logfile - \
+    --error-logfile -
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
