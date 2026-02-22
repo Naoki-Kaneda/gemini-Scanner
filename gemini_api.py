@@ -263,6 +263,7 @@ MAX_IMAGE_PIXELS = 20_000_000  # 最大ピクセル数（約80MB RAM相当）
 CONTRAST_FACTOR = 1.5          # コントラスト強調係数
 SHARPNESS_FACTOR = 1.5         # シャープネス強調係数（文字の輪郭を明確に）
 JPEG_QUALITY = 95              # JPEG保存品質
+BOX_SCALE = 1000               # Gemini box_2d 座標の正規化スケール（0〜1000）
 
 
 # ─── レスポンスビルダー（辞書構築の一元化） ───────────────
@@ -345,10 +346,10 @@ def _clamp(value, min_val, max_val):
 
 
 def _sanitize_box_2d(box_2d):
-    """box_2d を 0-1000 範囲にクランプし、反転ボックスを修正する。"""
+    """box_2d を 0〜BOX_SCALE 範囲にクランプし、反転ボックスを修正する。"""
     if not box_2d or len(box_2d) != 4:
         return None
-    y_min, x_min, y_max, x_max = [_clamp(v, 0, 1000) for v in box_2d]
+    y_min, x_min, y_max, x_max = [_clamp(v, 0, BOX_SCALE) for v in box_2d]
     # 反転ボックスの修正（Geminiが稀にmin/maxを逆に返す場合）
     if y_min > y_max:
         y_min, y_max = y_max, y_min
@@ -359,10 +360,10 @@ def _sanitize_box_2d(box_2d):
 
 def _gemini_box_to_pixel_vertices(box_2d, img_width, img_height):
     """
-    Gemini box_2d [y_min, x_min, y_max, x_max] (0-1000) → ピクセル座標4頂点。
+    Gemini box_2d [y_min, x_min, y_max, x_max] (0〜BOX_SCALE) → ピクセル座標4頂点。
 
     Args:
-        box_2d: [y_min, x_min, y_max, x_max] 0-1000スケール
+        box_2d: [y_min, x_min, y_max, x_max] 0〜BOX_SCALEスケール
         img_width: 画像の幅（ピクセル）
         img_height: 画像の高さ（ピクセル）
 
@@ -373,10 +374,10 @@ def _gemini_box_to_pixel_vertices(box_2d, img_width, img_height):
     if not sanitized:
         return []
     y_min, x_min, y_max, x_max = sanitized
-    px_x_min = int((x_min / 1000) * img_width)
-    px_y_min = int((y_min / 1000) * img_height)
-    px_x_max = int((x_max / 1000) * img_width)
-    px_y_max = int((y_max / 1000) * img_height)
+    px_x_min = int((x_min / BOX_SCALE) * img_width)
+    px_y_min = int((y_min / BOX_SCALE) * img_height)
+    px_x_max = int((x_max / BOX_SCALE) * img_width)
+    px_y_max = int((y_max / BOX_SCALE) * img_height)
     return [
         [px_x_min, px_y_min],
         [px_x_max, px_y_min],
@@ -387,10 +388,10 @@ def _gemini_box_to_pixel_vertices(box_2d, img_width, img_height):
 
 def _gemini_box_to_normalized_vertices(box_2d):
     """
-    Gemini box_2d [y_min, x_min, y_max, x_max] (0-1000) → 正規化座標(0-1) 4頂点。
+    Gemini box_2d [y_min, x_min, y_max, x_max] (0〜BOX_SCALE) → 正規化座標(0-1) 4頂点。
 
     Args:
-        box_2d: [y_min, x_min, y_max, x_max] 0-1000スケール
+        box_2d: [y_min, x_min, y_max, x_max] 0〜BOX_SCALEスケール
 
     Returns:
         [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] 正規化座標（左上→右上→右下→左下）
@@ -399,10 +400,10 @@ def _gemini_box_to_normalized_vertices(box_2d):
     if not sanitized:
         return []
     y_min, x_min, y_max, x_max = sanitized
-    nx_min = x_min / 1000
-    ny_min = y_min / 1000
-    nx_max = x_max / 1000
-    ny_max = y_max / 1000
+    nx_min = x_min / BOX_SCALE
+    ny_min = y_min / BOX_SCALE
+    nx_max = x_max / BOX_SCALE
+    ny_max = y_max / BOX_SCALE
     return [
         [nx_min, ny_min],
         [nx_max, ny_min],
@@ -411,7 +412,29 @@ def _gemini_box_to_normalized_vertices(box_2d):
     ]
 
 
-# ─── 画像寸法取得 ─────────────────────────────────
+# ─── 画像共通処理 ─────────────────────────────────
+def _open_image(image_b64):
+    """
+    Base64画像をデコードしてPIL Imageとして返す（サイズチェック付き）。
+    呼び出し元で with 文を使い、使用後に確実にクローズすること。
+
+    Args:
+        image_b64: Base64エンコードされた画像文字列。
+
+    Returns:
+        PIL.Image.Image インスタンス。
+
+    Raises:
+        ValueError: 画像サイズが MAX_IMAGE_PIXELS を超える場合。
+    """
+    image_bytes = base64.b64decode(image_b64)
+    img = Image.open(io.BytesIO(image_bytes))
+    if img.width * img.height > MAX_IMAGE_PIXELS:
+        img.close()
+        raise ValueError(f"画像サイズが大きすぎます: {img.width}x{img.height}")
+    return img
+
+
 def _get_image_dimensions(image_b64):
     """
     Base64画像のピクセル寸法を取得する（デコードのみ、画像加工なし）。
@@ -424,21 +447,21 @@ def _get_image_dimensions(image_b64):
         [width, height] または None（取得失敗時）
     """
     try:
-        image_bytes = base64.b64decode(image_b64)
-        with Image.open(io.BytesIO(image_bytes)) as img:
+        with _open_image(image_b64) as img:
             return [img.width, img.height]
     except Exception:
         return None
 
 
-# ─── 画像前処理 ──────────────────────────────────
-def _ensure_jpeg(image_base64):
+def _ensure_jpeg(image_b64, enhance=False):
     """
-    画像をJPEG形式に統一変換する（全モード共通）。
+    画像をJPEG形式に統一変換する。
     PNG等の非JPEG画像をJPEGに変換し、Gemini APIのmimeType: image/jpeg と整合させる。
+    enhance=True の場合、コントラスト・シャープネスも強調する（OCR精度向上用）。
 
     Args:
-        image_base64: Base64エンコードされた画像文字列。
+        image_b64: Base64エンコードされた画像文字列。
+        enhance: Trueならコントラスト・シャープネスを強調する（text/labelモード用）。
 
     Returns:
         JPEG形式のBase64エンコード画像文字列。
@@ -446,46 +469,15 @@ def _ensure_jpeg(image_base64):
     Raises:
         ValueError: 画像サイズが MAX_IMAGE_PIXELS を超える場合。
     """
-    image_bytes = base64.b64decode(image_base64)
-    with Image.open(io.BytesIO(image_bytes)) as img:
-        # 画像展開爆弾対策: ピクセル数が大きすぎる場合は拒否
-        if img.width * img.height > MAX_IMAGE_PIXELS:
-            raise ValueError(f"画像サイズが大きすぎます: {img.width}x{img.height}")
-
+    with _open_image(image_b64) as img:
         # RGBA/CMYK等のモードをRGBに変換（JPEG保存に必要）
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
 
-        # JPEG形式で高画質保存
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=JPEG_QUALITY)
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-
-def preprocess_image(image_base64):
-    """
-    OCR精度向上のため画像の前処理を行う。
-    JPEG変換に加え、コントラストとシャープネスを軽く強調する。
-
-    Args:
-        image_base64: Base64エンコードされた画像文字列。
-
-    Returns:
-        前処理済みのBase64エンコード画像文字列。
-    """
-    image_bytes = base64.b64decode(image_base64)
-    with Image.open(io.BytesIO(image_bytes)) as img:
-        # 画像展開爆弾対策: ピクセル数が大きすぎる場合は拒否
-        if img.width * img.height > MAX_IMAGE_PIXELS:
-            raise ValueError(f"画像サイズが大きすぎます: {img.width}x{img.height}")
-
-        # RGBA/CMYK等のモードをRGBに変換（JPEG保存に必要）
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-
-        # コントラスト・シャープネスを強調（OCR精度向上）
-        img = ImageEnhance.Contrast(img).enhance(CONTRAST_FACTOR)
-        img = ImageEnhance.Sharpness(img).enhance(SHARPNESS_FACTOR)
+        # OCRモード用: コントラスト・シャープネスを強調
+        if enhance:
+            img = ImageEnhance.Contrast(img).enhance(CONTRAST_FACTOR)
+            img = ImageEnhance.Sharpness(img).enhance(SHARPNESS_FACTOR)
 
         # JPEG形式で高画質保存
         buffer = io.BytesIO()
@@ -569,23 +561,14 @@ def detect_content(image_b64, mode="text", request_id=""):
     if mode not in VALID_MODES:
         raise ValueError(f"不正なモード: '{mode}'。許可値: {VALID_MODES}")
 
-    # text/labelモード: コントラスト・シャープネス強調付きJPEG変換（OCR精度向上）
-    # その他のモード: JPEG形式への統一変換のみ（MIME整合保証）
-    if mode in ("text", "label"):
-        try:
-            image_b64 = preprocess_image(image_b64)
-        except ValueError:
-            # 安全チェック違反（画像サイズ超過等）はスキップ不可 → 呼び出し元へ伝播
-            raise
-        except Exception as e:
-            logger.warning("前処理をスキップ（画像強調のみ省略）: %s", e)
-    else:
-        try:
-            image_b64 = _ensure_jpeg(image_b64)
-        except ValueError:
-            raise
-        except Exception as e:
-            logger.warning("JPEG変換をスキップ: %s", e)
+    # 全モード共通: JPEG変換（MIME整合保証）。text/labelのみ画質強調も実施
+    try:
+        image_b64 = _ensure_jpeg(image_b64, enhance=mode in ("text", "label"))
+    except ValueError:
+        # 安全チェック違反（画像サイズ超過等）はスキップ不可 → 呼び出し元へ伝播
+        raise
+    except Exception as e:
+        logger.warning("画像前処理をスキップ: %s", e)
 
     # Gemini APIリクエストペイロード構築
     payload = _build_gemini_payload(image_b64, mode)
@@ -675,46 +658,8 @@ def detect_content(image_b64, mode="text", request_id=""):
 
         logger.info("Gemini API レスポンス keys: %s (mode=%s)", list(gemini_data.keys()), mode)
 
-        # モード別パーサーで変換
-        if mode == "text":
-            image_size = _get_image_dimensions(image_b64)
-            data = _parse_gemini_text_response(gemini_data, image_size)
-            logger.info("テキスト検出結果: %d件, image_size=%s", len(data), image_size)
-            return _make_success(data, image_size)
-
-        elif mode == "label":
-            image_size = _get_image_dimensions(image_b64)
-            data, label_detected, label_reason = _parse_gemini_label_response(gemini_data, image_size)
-            logger.info("ラベル検出結果: detected=%s, reason=%s", label_detected, label_reason)
-            return _make_success(data, image_size, label_detected=label_detected, label_reason=label_reason)
-
-        elif mode == "face":
-            image_size = _get_image_dimensions(image_b64)
-            data = _parse_gemini_face_response(gemini_data, image_size)
-            logger.info("顔検出結果: %d件, image_size=%s", len(data), image_size)
-            return _make_success(data, image_size)
-
-        elif mode == "logo":
-            image_size = _get_image_dimensions(image_b64)
-            data = _parse_gemini_logo_response(gemini_data, image_size)
-            logger.info("ロゴ検出結果: %d件, image_size=%s", len(data), image_size)
-            return _make_success(data, image_size)
-
-        elif mode == "classify":
-            data = _parse_gemini_classify_response(gemini_data)
-            logger.info("分類タグ結果: %d件", len(data))
-            return _make_success(data, None)
-
-        elif mode == "web":
-            data, web_detail = _parse_gemini_web_response(gemini_data)
-            logger.info("AI識別結果: entities=%d件", len(web_detail.get("entities", [])))
-            return _make_success(data, web_detail=web_detail)
-
-        else:
-            # objectモード
-            data = _parse_gemini_object_response(gemini_data)
-            logger.info("物体検出結果: %d件", len(data))
-            return _make_success(data, None)  # 物体モードは正規化座標（0〜1）を使用
+        # モード別パーサーでレスポンスを変換
+        return _dispatch_mode_handler(mode, gemini_data, image_b64)
 
     except requests.exceptions.Timeout:
         logger.error("[%s] Gemini API タイムアウト (mode=%s)", request_id, mode)
@@ -995,3 +940,53 @@ def _parse_gemini_web_response(gemini_data):
     }
 
     return data, web_detail
+
+
+# ─── モード別ディスパッチ ──────────────────────────
+# 各モードのパーサー・image_size要否・ログラベルを一元管理
+_MODE_HANDLERS = {
+    "text":     {"parser": "_parse_gemini_text_response",     "needs_image_size": True,  "log": "テキスト検出"},
+    "object":   {"parser": "_parse_gemini_object_response",   "needs_image_size": False, "log": "物体検出"},
+    "label":    {"parser": "_parse_gemini_label_response",    "needs_image_size": True,  "log": "ラベル検出"},
+    "face":     {"parser": "_parse_gemini_face_response",     "needs_image_size": True,  "log": "顔検出"},
+    "logo":     {"parser": "_parse_gemini_logo_response",     "needs_image_size": True,  "log": "ロゴ検出"},
+    "classify": {"parser": "_parse_gemini_classify_response", "needs_image_size": False, "log": "分類タグ"},
+    "web":      {"parser": "_parse_gemini_web_response",      "needs_image_size": False, "log": "AI識別"},
+}
+
+
+def _dispatch_mode_handler(mode, gemini_data, image_b64):
+    """
+    モードに応じたパーサーを呼び出し、統一された成功レスポンスを返す。
+
+    Args:
+        mode: 検出モード文字列。
+        gemini_data: Geminiが返したJSON。
+        image_b64: Base64エンコード済み画像（image_size取得用）。
+
+    Returns:
+        dict: _make_success() 形式のレスポンス辞書。
+    """
+    handler = _MODE_HANDLERS[mode]
+    parser_func = globals()[handler["parser"]]
+    image_size = _get_image_dimensions(image_b64) if handler["needs_image_size"] else None
+
+    # label/web は特殊な戻り値を持つ
+    if mode == "label":
+        data, label_detected, label_reason = parser_func(gemini_data, image_size)
+        logger.info("%s結果: detected=%s, reason=%s", handler["log"], label_detected, label_reason)
+        return _make_success(data, image_size, label_detected=label_detected, label_reason=label_reason)
+
+    if mode == "web":
+        data, web_detail = parser_func(gemini_data)
+        logger.info("%s結果: entities=%d件", handler["log"], len(web_detail.get("entities", [])))
+        return _make_success(data, web_detail=web_detail)
+
+    # 共通パターン: parser(gemini_data) or parser(gemini_data, image_size)
+    if handler["needs_image_size"]:
+        data = parser_func(gemini_data, image_size)
+    else:
+        data = parser_func(gemini_data)
+
+    logger.info("%s結果: %d件", handler["log"], len(data))
+    return _make_success(data, image_size)

@@ -457,16 +457,11 @@ def analyze_endpoint():
 
         if result["ok"]:
             _log("info", "api_success", ip=client_ip, mode=mode, items=len(result["data"]))
-        else:
-            release_request(rate_key, request_id)
-            _log("warning", "api_failure", ip=client_ip, mode=mode, error_code=result["error_code"])
+            return jsonify(result), 200
 
-        if result["ok"]:
-            status_code = 200
-        elif result.get("error_code") == "RATE_LIMITED":
-            status_code = 429
-        else:
-            status_code = 502
+        release_request(rate_key, request_id)
+        _log("warning", "api_failure", ip=client_ip, mode=mode, error_code=result["error_code"])
+        status_code = 429 if result.get("error_code") == "RATE_LIMITED" else 502
         return jsonify(result), status_code
 
     except ValueError as e:

@@ -328,13 +328,13 @@ class TestMaskProxyUrl:
 
 # ─── 画像安全チェックテスト ────────────────────
 class TestImageSafetyCheck:
-    """preprocess_image の安全チェックがバイパスされないことのテスト。"""
+    """_ensure_jpeg の安全チェックがバイパスされないことのテスト。"""
 
     @patch("gemini_api.session.post")
-    @patch("gemini_api.preprocess_image")
-    def test_ValueError時はdetect_contentがValueErrorを伝播する(self, mock_preprocess, mock_post):
-        """preprocess_imageがValueErrorを投げた場合、detect_contentも伝播すること。"""
-        mock_preprocess.side_effect = ValueError("画像サイズが大きすぎます")
+    @patch("gemini_api._ensure_jpeg")
+    def test_ValueError時はdetect_contentがValueErrorを伝播する(self, mock_ensure, mock_post):
+        """_ensure_jpegがValueErrorを投げた場合、detect_contentも伝播すること。"""
+        mock_ensure.side_effect = ValueError("画像サイズが大きすぎます")
         from gemini_api import detect_content
         with pytest.raises(ValueError, match="画像サイズが大きすぎます"):
             detect_content(make_b64(), mode="text")
@@ -342,10 +342,10 @@ class TestImageSafetyCheck:
         mock_post.assert_not_called()
 
     @patch("gemini_api.session.post")
-    @patch("gemini_api.preprocess_image")
-    def test_非ValueErrorの前処理エラーはスキップしてAPI呼び出しを続行する(self, mock_preprocess, mock_post):
+    @patch("gemini_api._ensure_jpeg")
+    def test_非ValueErrorの前処理エラーはスキップしてAPI呼び出しを続行する(self, mock_ensure, mock_post):
         """前処理でValueError以外のエラーが出た場合はスキップしてAPI呼び出しを続行すること。"""
-        mock_preprocess.side_effect = OSError("一時的なI/Oエラー")
+        mock_ensure.side_effect = OSError("一時的なI/Oエラー")
         mock_post.return_value = make_gemini_response({"texts": []})
         from gemini_api import detect_content
         result = detect_content(make_b64(), mode="text")
