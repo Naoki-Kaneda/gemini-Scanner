@@ -253,6 +253,13 @@ video {
     object-fit: contain;
 }
 
+/* ─── 静止画表示用 ──────────────────────────────── */
+#image-feed {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
 /* ─── ミラー反転 ──────────────────────────────── */
 .video-container.mirrored video {
     transform: scaleX(-1);

@@ -55,7 +55,7 @@ ERR_INVALID_MODE = "INVALID_MODE"
 ERR_INVALID_BASE64 = "INVALID_BASE64"
 ERR_IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE"
 ERR_INVALID_IMAGE_FORMAT = "INVALID_IMAGE_FORMAT"
-ERR_RATE_LIMITED = "RATE_LIMITED"
+ERR_RATE_LIMITED = "APP_RATE_LIMITED"  # アプリ側レート制限（Google側 RATE_LIMITED と区別）
 ERR_VALIDATION_ERROR = "VALIDATION_ERROR"
 ERR_SERVER_ERROR = "SERVER_ERROR"
 ERR_REQUEST_TOO_LARGE = "REQUEST_TOO_LARGE"
@@ -148,6 +148,16 @@ def inject_template_globals():
 TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
 if TRUST_PROXY:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+    logger.info("TRUST_PROXY: X-Forwarded-For からクライアントIPを取得します")
+else:
+    # Render/nginx等のプロキシ環境を検出して警告
+    _proxy_hints = [os.getenv("RENDER"), os.getenv("DYNO"), os.getenv("FLY_APP_NAME")]
+    if any(_proxy_hints):
+        logger.warning(
+            "⚠ プロキシ環境を検出しましたが TRUST_PROXY=false です。"
+            "全ユーザーが同一IPとして認識され、レート制限が偏る可能性があります。"
+            "TRUST_PROXY=true の設定を推奨します。"
+        )
 
 
 # ─── リクエストコンテキスト（request-id / CSPノンス） ──
@@ -476,7 +486,7 @@ def analyze_endpoint():
 
         release_request(rate_key, request_id)
         _log("warning", "api_failure", ip=client_ip, mode=mode, error_code=result["error_code"])
-        status_code = 429 if result.get("error_code") == "RATE_LIMITED" else 502
+        status_code = 429 if result.get("error_code") == "GEMINI_RATE_LIMITED" else 502
         return jsonify(result), status_code
 
     except ValueError as e:

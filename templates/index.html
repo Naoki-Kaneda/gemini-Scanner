@@ -36,12 +36,13 @@
                         <button id="btn-camera" class="control-btn active">カメラ</button>
                         <select id="camera-selector" class="control-select hidden"></select>
                         <button id="btn-file" class="control-btn">ファイル</button>
-                        <input type="file" id="file-input" accept="video/*" class="hidden">
+                        <input type="file" id="file-input" accept="video/*,image/*" class="hidden">
                     </div>
                 </div>
 
                 <div class="video-container">
                     <video id="video-feed" autoplay playsinline muted></video>
+                    <img id="image-feed" class="hidden" alt="アップロード画像">
                     <canvas id="overlay-canvas"></canvas>
                     <div class="scan-overlay"></div>
                     <div class="target-box"></div>

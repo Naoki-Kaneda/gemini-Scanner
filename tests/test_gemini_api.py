@@ -75,6 +75,22 @@ class TestDetectContentHttpErrors:
         assert result["ok"] is False
         assert result["error_code"] == "API_500"
 
+    @patch("gemini_api.time.sleep")
+    @patch("gemini_api.session.post")
+    def test_429後に成功した場合は再試行でokTrueを返す(self, mock_post, mock_sleep):
+        """HTTP 429 の後に200が返れば、自動再試行で成功扱いになること。"""
+        res_429 = make_mock_response(status_code=429)
+        res_429.headers = {"Retry-After": "0"}
+        mock_post.side_effect = [
+            res_429,
+            make_gemini_response({"objects": []}),
+        ]
+        from gemini_api import detect_content
+        result = detect_content(make_b64(), mode="object")
+        assert result["ok"] is True
+        assert mock_post.call_count == 2
+        mock_sleep.assert_called_once_with(0.0)
+
     @patch("gemini_api.session.post")
     def test_タイムアウトはokFalseを返す(self, mock_post):
         """タイムアウト発生時は ok=False, error_code=TIMEOUT を返すこと。"""

@@ -8,6 +8,7 @@ import io
 import json
 import base64
 import logging
+import time
 from threading import Lock
 
 import requests
@@ -248,7 +249,9 @@ MODE_SCHEMAS = {
     },
 }
 
-API_TIMEOUT_SECONDS = 10  # Retry3回+backoff合計 = 最大約33.5秒 < gunicorn timeout 60秒
+API_TIMEOUT_SECONDS = 30  # Gemini 2.5-flash（思考モデル）は応答に時間がかかるため余裕を持たせる
+GEMINI_429_MAX_RETRIES = int(os.getenv("GEMINI_429_MAX_RETRIES", "2"))
+GEMINI_429_BACKOFF_BASE_SECONDS = float(os.getenv("GEMINI_429_BACKOFF_BASE_SECONDS", "1.5"))
 
 # ─── エラーコード定数（タイポ防止） ─────────────────────
 ERR_TIMEOUT = "TIMEOUT"
@@ -277,6 +280,20 @@ def _make_error(error_code, message):
     """失敗レスポンス辞書を生成する。"""
     return {"ok": False, "data": [], "image_size": None,
             "error_code": error_code, "message": message}
+
+
+def _get_retry_after_seconds(response, fallback_seconds):
+    """Retry-After ヘッダーを秒に正規化して返す（不正値はフォールバック）。"""
+    try:
+        raw_value = response.headers.get("Retry-After", "")
+        if not raw_value:
+            return fallback_seconds
+        seconds = float(raw_value)
+        if seconds < 0:
+            return fallback_seconds
+        return seconds
+    except Exception:
+        return fallback_seconds
 
 
 # SSL検証無効時のみ警告を抑制
@@ -517,6 +534,9 @@ def _build_gemini_payload(image_b64, mode):
             "responseMimeType": "application/json",
             "responseSchema": MODE_SCHEMAS[mode],
             "temperature": 0.1,  # 低温度で一貫した結果を得る
+            "thinkingConfig": {
+                "thinkingBudget": 0,  # 思考トークンを無効化（クォータ消費を大幅削減）
+            },
         },
     }
     return payload
@@ -582,19 +602,31 @@ def detect_content(image_b64, mode="text", request_id=""):
             "x-goog-api-key": API_KEY,
             "Content-Type": "application/json",
         }
-        response = session.post(
-            api_url, json=payload, headers=api_headers, timeout=API_TIMEOUT_SECONDS
-        )
+        response = None
+        for attempt in range(GEMINI_429_MAX_RETRIES + 1):
+            response = session.post(
+                api_url, json=payload, headers=api_headers, timeout=API_TIMEOUT_SECONDS
+            )
+            if response.status_code != 429:
+                break
 
-        if response.status_code == 429:
-            logger.warning(
-                "[%s] レート制限 (mode=%s): %.300s",
-                request_id, mode, response.text,
+            if attempt >= GEMINI_429_MAX_RETRIES:
+                logger.warning(
+                    "[%s] レート制限 (mode=%s, attempts=%d): %.300s",
+                    request_id, mode, attempt + 1, response.text,
+                )
+                return _make_error(
+                    "GEMINI_RATE_LIMITED",
+                    "Gemini APIレート制限中です。しばらく待ってから再試行してください。",
+                )
+
+            fallback_wait = GEMINI_429_BACKOFF_BASE_SECONDS * (2 ** attempt)
+            sleep_seconds = _get_retry_after_seconds(response, fallback_wait)
+            logger.info(
+                "[%s] Gemini 429を受信したためリトライします (mode=%s, attempt=%d/%d, wait=%.2fs)",
+                request_id, mode, attempt + 1, GEMINI_429_MAX_RETRIES + 1, sleep_seconds,
             )
-            return _make_error(
-                "RATE_LIMITED",
-                "APIレート制限中です。しばらく待ってから再試行してください。",
-            )
+            time.sleep(sleep_seconds)
 
         if response.status_code != 200:
             logger.error(

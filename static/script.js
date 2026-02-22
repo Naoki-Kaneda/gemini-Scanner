@@ -31,7 +31,7 @@ const CAPTURE_RESET_DELAY_MS = 30000;      // 撮影完了後の次スキャン�
 const LABEL_CAPTURE_RESET_DELAY_MS = 30000; // ラベルモード: 次のスキャンまでの待機（ミリ秒）
 // true にするとクライアント側でも日次上限を強制。既定は false（サーバー側429に委譲）
 const ENFORCE_CLIENT_DAILY_LIMIT = false;
-const FETCH_TIMEOUT_MS = 45000;      // fetch タイムアウト（Gemini API 30秒＋余裕15秒）
+const FETCH_TIMEOUT_MS = 60000;      // fetch タイムアウト（Gemini API 30秒×リトライ＋余裕）
 let DUPLICATE_SKIP_COUNT = 2;        // 同じ結果がN回連続したらカメラ移動まで一時停止（UI設定で変更可）
 
 // モードごとのバウンディングボックス色設定
@@ -60,6 +60,7 @@ function fetchSignal(ms = FETCH_TIMEOUT_MS) {
 
 // ─── DOM要素の参照（init() で DOMContentLoaded 後に取得） ────
 let video, canvas, ctx, overlayCanvas, overlayCtx;
+let imageFeed;  // 静止画表示用 <img> 要素
 let resultList, btnScan, statusDot, statusText;
 let videoContainer, stabilityBarContainer, stabilityBarFill;
 let btnProxy, apiCounter, dupSkipBadge, cameraSelector;
@@ -405,27 +406,59 @@ function updateFlipButtonVisibility() {
     }
 }
 
-/** 動画ファイルをアップロードして再生する。 */
+/** ファイル（動画または静止画）をアップロードして表示する。 */
 function handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
 
     stopCameraStream();
+    // スキャン中なら停止
+    if (isScanning) stopScanning();
 
     // 前のBlob URLがあればリボークしてメモリリークを防止
     if (video.src && video.src.startsWith('blob:')) {
         URL.revokeObjectURL(video.src);
     }
-    video.src = URL.createObjectURL(file);
-    video.loop = true;
-    video.play();
-    currentSource = 'file';
+    if (imageFeed && imageFeed.src && imageFeed.src.startsWith('blob:')) {
+        URL.revokeObjectURL(imageFeed.src);
+    }
+
+    const isImage = file.type.startsWith('image/');
+
+    if (isImage) {
+        // 静止画: <img> 要素に表示、<video> を非表示
+        const blobUrl = URL.createObjectURL(file);
+        imageFeed.src = blobUrl;
+        imageFeed.classList.remove('hidden');
+        video.classList.add('hidden');
+        video.pause();
+        video.removeAttribute('src');
+        currentSource = 'image';
+    } else {
+        // 動画: <video> 要素で再生、<img> を非表示
+        imageFeed.classList.add('hidden');
+        imageFeed.removeAttribute('src');
+        video.classList.remove('hidden');
+        video.src = URL.createObjectURL(file);
+        video.loop = true;
+        video.play();
+        currentSource = 'file';
+    }
     updateSourceButtons();
 }
 
 /** 入力ソースをカメラに切り替える。 */
 function switchSource(source) {
     if (source === 'camera') {
+        // 静止画表示をリセット
+        if (imageFeed) {
+            if (imageFeed.src && imageFeed.src.startsWith('blob:')) {
+                URL.revokeObjectURL(imageFeed.src);
+            }
+            imageFeed.removeAttribute('src');
+            imageFeed.classList.add('hidden');
+        }
+        video.classList.remove('hidden');
         setupCamera();
     }
 }
@@ -433,7 +466,8 @@ function switchSource(source) {
 /** Camera / File ボタンのアクティブ状態を更新する。 */
 function updateSourceButtons() {
     if (btnCamera) btnCamera.classList.toggle('active', currentSource === 'camera');
-    if (btnFile) btnFile.classList.toggle('active', currentSource === 'file');
+    // 'file'（動画）と 'image'（静止画）の両方でファイルボタンをアクティブに
+    if (btnFile) btnFile.classList.toggle('active', currentSource === 'file' || currentSource === 'image');
 }
 
 
@@ -484,7 +518,15 @@ function startScanning() {
     duplicateCount = 0;
     lastResultFingerprint = null;
 
-    // 安定化バーを表示
+    // 静止画モード: 安定化検出不要 → 即座に解析を実行
+    if (currentSource === 'image') {
+        if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
+        if (statusText) statusText.textContent = '解析中...';
+        captureAndAnalyze();
+        return;
+    }
+
+    // 動画/カメラモード: 安定化バーを表示してスキャンループ開始
     if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
     if (stabilityBarFill) stabilityBarFill.style.width = '0%';
 
@@ -723,21 +765,27 @@ function drawBoundingBoxes(data, imageSize) {
 // 画像キャプチャ・API解析
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/** ターゲットボックス内の映像をキャプチャしてAPIに送信する。 */
+/** ターゲットボックス内の映像（または静止画）をキャプチャしてAPIに送信する。 */
 async function captureAndAnalyze() {
-    if (!video.videoWidth || isAnalyzing || isApiLimitReached()) return;
+    // 静止画モード: imageFeed の naturalWidth を使用、動画モード: video.videoWidth を使用
+    const isImageSource = currentSource === 'image';
+    const sourceEl = isImageSource ? imageFeed : video;
+    const sourceW = isImageSource ? imageFeed.naturalWidth : video.videoWidth;
+    const sourceH = isImageSource ? imageFeed.naturalHeight : video.videoHeight;
+
+    if (!sourceW || isAnalyzing || isApiLimitReached()) return;
     isAnalyzing = true;
     clearOverlay();
 
     // ターゲットボックス内のみをクロップして送信（CSSの.target-boxと同期）
-    const srcX = video.videoWidth * (1 - TARGET_BOX_RATIO) / 2;  // 横: 中央寄せ
-    const srcY = video.videoHeight * TARGET_BOX_TOP;               // 縦: 上端10%
-    const srcW = video.videoWidth * TARGET_BOX_RATIO;
-    const srcH = video.videoHeight * TARGET_BOX_HEIGHT;
+    const srcX = sourceW * (1 - TARGET_BOX_RATIO) / 2;  // 横: 中央寄せ
+    const srcY = sourceH * TARGET_BOX_TOP;                // 縦: 上端10%
+    const srcW = sourceW * TARGET_BOX_RATIO;
+    const srcH = sourceH * TARGET_BOX_HEIGHT;
 
     canvas.width = srcW;
     canvas.height = srcH;
-    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+    ctx.drawImage(sourceEl, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
 
     const imageData = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
 
@@ -1291,6 +1339,7 @@ function init() {
     // ─── DOM要素の取得（DOMContentLoaded 保証下で安全に取得） ──
     videoContainer = document.querySelector('.video-container');
     video = document.getElementById('video-feed');
+    imageFeed = document.getElementById('image-feed');
     canvas = document.getElementById('capture-canvas');
     overlayCanvas = document.getElementById('overlay-canvas');
     resultList = document.getElementById('result-list');
