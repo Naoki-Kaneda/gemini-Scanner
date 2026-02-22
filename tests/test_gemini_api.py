@@ -359,14 +359,16 @@ class TestImageSafetyCheck:
 
     @patch("gemini_api.session.post")
     @patch("gemini_api._ensure_jpeg")
-    def test_非ValueErrorの前処理エラーはスキップしてAPI呼び出しを続行する(self, mock_ensure, mock_post):
-        """前処理でValueError以外のエラーが出た場合はスキップしてAPI呼び出しを続行すること。"""
+    def test_非ValueErrorの前処理エラーはフェイルクローズでエラーを返す(self, mock_ensure, mock_post):
+        """前処理でValueError以外のエラーが出た場合はAPI送信せずエラーを返すこと（フェイルクローズ）。"""
         mock_ensure.side_effect = OSError("一時的なI/Oエラー")
-        mock_post.return_value = make_gemini_response({"texts": []})
         from gemini_api import detect_content
         result = detect_content(make_b64(), mode="text")
-        assert result["ok"] is True
-        mock_post.assert_called_once()
+        assert result["ok"] is False
+        assert result["error_code"] == "PARSE_ERROR"
+        assert "前処理" in result["message"]
+        # APIは呼ばれないこと（安全チェックすり抜け防止）
+        mock_post.assert_not_called()
 
 
 # ─── get_proxy_status: 4パターン回帰テスト ──────────────

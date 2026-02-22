@@ -269,6 +269,17 @@ JPEG_QUALITY = 95              # JPEG保存品質
 BOX_SCALE = 1000               # Gemini box_2d 座標の正規化スケール（0〜1000）
 
 
+def _build_thinking_config():
+    """モデルに応じた thinkingConfig を返す。
+
+    Gemini 2.x系: thinkingBudget（トークン数指定）で制御。
+    Gemini 3.x系: thinkingLevel（レベル指定）が推奨。thinkingBudgetは互換扱い。
+    """
+    if GEMINI_MODEL.startswith("gemini-3"):
+        return {"thinkingLevel": "NONE"}
+    return {"thinkingBudget": 0}
+
+
 # ─── レスポンスビルダー（辞書構築の一元化） ───────────────
 def _make_success(data, image_size=None, **extra):
     """成功レスポンス辞書を生成する。"""
@@ -540,9 +551,7 @@ def _build_gemini_payload(image_b64, mode, context_hint=""):
             "responseMimeType": "application/json",
             "responseSchema": MODE_SCHEMAS[mode],
             "temperature": 0.1,  # 低温度で一貫した結果を得る
-            "thinkingConfig": {
-                "thinkingBudget": 0,  # 思考トークンを無効化（クォータ消費を大幅削減）
-            },
+            "thinkingConfig": _build_thinking_config(),  # 思考トークンを無効化（クォータ消費を大幅削減）
         },
     }
     return payload
@@ -595,7 +604,9 @@ def detect_content(image_b64, mode="text", request_id="", context_hint=""):
         # 安全チェック違反（画像サイズ超過等）はスキップ不可 → 呼び出し元へ伝播
         raise
     except Exception as e:
-        logger.warning("画像前処理をスキップ: %s", e)
+        # フェイルクローズ: 前処理失敗時はAPI送信せずエラーを返す（安全チェックすり抜け防止）
+        logger.error("画像前処理に失敗 (%s): %s", type(e).__name__, e)
+        return _make_error(ERR_PARSE_ERROR, "画像の前処理に失敗しました")
 
     # Gemini APIリクエストペイロード構築
     payload = _build_gemini_payload(image_b64, mode, context_hint=context_hint)
@@ -683,7 +694,8 @@ def detect_content(image_b64, mode="text", request_id="", context_hint=""):
         if not parts:
             return _make_success([])
 
-        raw_text = parts[0].get("text", "")
+        # 複数partにテキストが分割される場合があるため全partを結合する
+        raw_text = "".join(p.get("text", "") for p in parts)
         if not raw_text.strip():
             return _make_success([])
 

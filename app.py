@@ -468,7 +468,8 @@ def _validate_analyze_request():
                 ERR_INVALID_IMAGE_FORMAT,
                 "許可されていない画像形式です（JPEG/PNGのみ対応）",
             )
-    except Exception:
+    except Exception as e:
+        logger.warning("Base64検証で想定外の例外 (%s): %s", type(e).__name__, e)
         return None, None, None, _error_response(ERR_INVALID_BASE64, "画像データのBase64デコードに失敗しました")
 
     return image_data, mode, hint, None

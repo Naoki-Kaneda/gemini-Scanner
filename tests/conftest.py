@@ -63,9 +63,15 @@ def create_valid_png_base64():
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def make_b64(data=b"\xff\xd8\xff\xd9"):
-    """最小限のBase64文字列を生成する。"""
-    return base64.b64encode(data).decode()
+def make_b64(data=None):
+    """テスト用Base64画像文字列を生成する。
+
+    引数なしの場合は_ensure_jpegを通過できる有効なJPEGを返す。
+    明示的にdataを渡した場合はそのバイト列をBase64エンコードする。
+    """
+    if data is not None:
+        return base64.b64encode(data).decode()
+    return create_valid_image_base64()
 
 
 def make_mock_response(status_code=200, json_data=None, content_type="application/json"):
