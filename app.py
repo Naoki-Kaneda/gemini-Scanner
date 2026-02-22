@@ -172,8 +172,13 @@ def add_security_headers(response):
     # カメラ・マイクのアクセスを同一オリジンに限定
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(self)"
 
-    # HTML/JS/CSSのブラウザキャッシュを防止（開発中の更新反映を保証）
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    # キャッシュ制御: APIとHTMLは no-store、静的ファイルはハッシュ付きURLで長期キャッシュ
+    if request.path.startswith("/static/"):
+        # 静的ファイル: ハッシュ付きURLで配信しているためブラウザキャッシュを活用
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        # API・HTML: キャッシュ無効化（常に最新を返す）
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
 
     # 相関IDをレスポンスヘッダーに付与（障害調査用）
     if req_id:
@@ -186,6 +191,8 @@ def add_security_headers(response):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Headers"] = "Content-Type"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        # CDN/プロキシが異なるOrigin向けレスポンスを混在キャッシュしないよう Vary を付与
+        response.headers["Vary"] = "Origin"
 
     return response
 
@@ -435,8 +442,11 @@ def analyze_endpoint():
         return validation_error
 
     # ─── レート制限チェック＆予約（原子的） ──
+    # IP + User-Agent先頭64文字のハッシュで複合キー生成（NAT配下の干渉軽減）
     client_ip = request.remote_addr or "unknown"
-    limited, limit_message, request_id = try_consume_request(client_ip)
+    ua_fragment = (request.headers.get("User-Agent", "") or "")[:64]
+    rate_key = f"{client_ip}:{hashlib.sha256(ua_fragment.encode()).hexdigest()[:8]}"
+    limited, limit_message, request_id = try_consume_request(rate_key)
     if limited:
         _log("info", "rate_limited", ip=client_ip, reason=limit_message)
         return _error_response(ERR_RATE_LIMITED, limit_message, 429)
@@ -448,7 +458,7 @@ def analyze_endpoint():
         if result["ok"]:
             _log("info", "api_success", ip=client_ip, mode=mode, items=len(result["data"]))
         else:
-            release_request(client_ip, request_id)
+            release_request(rate_key, request_id)
             _log("warning", "api_failure", ip=client_ip, mode=mode, error_code=result["error_code"])
 
         if result["ok"]:
@@ -460,12 +470,12 @@ def analyze_endpoint():
         return jsonify(result), status_code
 
     except ValueError as e:
-        release_request(client_ip, request_id)
+        release_request(rate_key, request_id)
         _log("warning", "validation_error", ip=client_ip, mode=mode, error=str(e))
         return _error_response(ERR_VALIDATION_ERROR, str(e))
 
     except Exception as e:
-        release_request(client_ip, request_id)
+        release_request(rate_key, request_id)
         _log("error", "server_error", ip=client_ip, mode=mode, error=str(e))
         return _error_response(ERR_SERVER_ERROR, "内部サーバーエラーが発生しました", 500)
 

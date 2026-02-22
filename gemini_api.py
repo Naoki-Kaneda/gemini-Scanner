@@ -25,8 +25,8 @@ from translations import (
 )
 
 # ─── 設定 ──────────────────────────────────────
-# .envファイルの値をOS環境変数より優先する（override=True）
-load_dotenv(override=True)
+# OS環境変数を優先し、未設定の場合のみ .env から読み込む（本番環境の安全性確保）
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -248,7 +248,7 @@ MODE_SCHEMAS = {
     },
 }
 
-API_TIMEOUT_SECONDS = 10  # Retry3回+backoff合計 = 最大43.5秒 < フロントfetch45秒
+API_TIMEOUT_SECONDS = 10  # Retry3回+backoff合計 = 最大約33.5秒 < gunicorn timeout 60秒
 
 # ─── エラーコード定数（タイポ防止） ─────────────────────
 ERR_TIMEOUT = "TIMEOUT"
@@ -432,10 +432,40 @@ def _get_image_dimensions(image_b64):
 
 
 # ─── 画像前処理 ──────────────────────────────────
+def _ensure_jpeg(image_base64):
+    """
+    画像をJPEG形式に統一変換する（全モード共通）。
+    PNG等の非JPEG画像をJPEGに変換し、Gemini APIのmimeType: image/jpeg と整合させる。
+
+    Args:
+        image_base64: Base64エンコードされた画像文字列。
+
+    Returns:
+        JPEG形式のBase64エンコード画像文字列。
+
+    Raises:
+        ValueError: 画像サイズが MAX_IMAGE_PIXELS を超える場合。
+    """
+    image_bytes = base64.b64decode(image_base64)
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        # 画像展開爆弾対策: ピクセル数が大きすぎる場合は拒否
+        if img.width * img.height > MAX_IMAGE_PIXELS:
+            raise ValueError(f"画像サイズが大きすぎます: {img.width}x{img.height}")
+
+        # RGBA/CMYK等のモードをRGBに変換（JPEG保存に必要）
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+
+        # JPEG形式で高画質保存
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=JPEG_QUALITY)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
 def preprocess_image(image_base64):
     """
     OCR精度向上のため画像の前処理を行う。
-    コントラストとシャープネスを軽く強調する。
+    JPEG変換に加え、コントラストとシャープネスを軽く強調する。
 
     Args:
         image_base64: Base64エンコードされた画像文字列。
@@ -539,7 +569,8 @@ def detect_content(image_b64, mode="text", request_id=""):
     if mode not in VALID_MODES:
         raise ValueError(f"不正なモード: '{mode}'。許可値: {VALID_MODES}")
 
-    # テキストモードまたはラベルモードの場合は前処理を適用（OCR精度向上）
+    # text/labelモード: コントラスト・シャープネス強調付きJPEG変換（OCR精度向上）
+    # その他のモード: JPEG形式への統一変換のみ（MIME整合保証）
     if mode in ("text", "label"):
         try:
             image_b64 = preprocess_image(image_b64)
@@ -548,6 +579,13 @@ def detect_content(image_b64, mode="text", request_id=""):
             raise
         except Exception as e:
             logger.warning("前処理をスキップ（画像強調のみ省略）: %s", e)
+    else:
+        try:
+            image_b64 = _ensure_jpeg(image_b64)
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.warning("JPEG変換をスキップ: %s", e)
 
     # Gemini APIリクエストペイロード構築
     payload = _build_gemini_payload(image_b64, mode)

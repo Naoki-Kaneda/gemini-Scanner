@@ -633,6 +633,7 @@ class TestCors:
         """許可されたOriginにはCORSヘッダーが付与されること。"""
         response = client.get("/", headers={"Origin": "https://trusted.example.com"})
         assert response.headers.get("Access-Control-Allow-Origin") == "https://trusted.example.com"
+        assert response.headers.get("Vary") == "Origin"
 
     @patch("app.ALLOWED_ORIGINS", ["https://trusted.example.com"])
     def test_許可されていないOriginにはCORSヘッダーが付かない(self, client):

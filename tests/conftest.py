@@ -54,15 +54,13 @@ def create_valid_image_base64():
 
 
 def create_valid_png_base64():
-    """テスト用の最小限の有効なPNG画像をBase64で返す。"""
-    # 最小限の有効なPNGバイナリ（1x1ピクセル、赤色）
-    png_bytes = (
-        b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01'
-        b'\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00'
-        b'\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00'
-        b'\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82'
-    )
-    return base64.b64encode(png_bytes).decode("utf-8")
+    """テスト用の有効なPNG画像をBase64で返す（PILで開けることを保証）。"""
+    from PIL import Image
+    import io
+    img = Image.new("RGB", (2, 2), color=(255, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
 def make_b64(data=b"\xff\xd8\xff\xd9"):

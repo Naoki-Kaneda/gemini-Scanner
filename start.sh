@@ -34,12 +34,34 @@ fi
 export SSL_CERT_PATH="$CERT_FILE"
 export SSL_KEY_PATH="$KEY_FILE"
 
-# ポート5000を使用中のプロセスを確認・停止
-PID=$(lsof -ti :5000 2>/dev/null)
-if [ -n "$PID" ]; then
-    echo "[!] ポート5000を使用中のプロセス(PID:${PID})を停止します..."
-    kill -9 $PID 2>/dev/null
-    sleep 1
+# ポート5000を使用中のプロセスを確認・停止（安全確認付き）
+PIDS=$(lsof -ti :5000 2>/dev/null)
+if [ -n "$PIDS" ]; then
+    echo "[!] ポート5000を使用中のプロセスが見つかりました:"
+    for PID in $PIDS; do
+        PROC_NAME=$(ps -p "$PID" -o comm= 2>/dev/null || echo "不明")
+        echo "    PID: ${PID}  プロセス名: ${PROC_NAME}"
+    done
+    read -r -p "これらのプロセスを停止しますか？ (y/N): " ANSWER
+    if [ "$ANSWER" = "y" ] || [ "$ANSWER" = "Y" ]; then
+        for PID in $PIDS; do
+            kill "$PID" 2>/dev/null
+        done
+        sleep 1
+        # GRACEFULに停止できなかった場合のみ強制終了
+        REMAINING=$(lsof -ti :5000 2>/dev/null)
+        if [ -n "$REMAINING" ]; then
+            echo "[!] graceful停止に失敗したプロセスを強制終了します..."
+            for PID in $REMAINING; do
+                kill -9 "$PID" 2>/dev/null
+            done
+            sleep 1
+        fi
+        echo "[OK] プロセスを停止しました。"
+    else
+        echo "[中止] プロセスの停止をキャンセルしました。ポート5000が使用中のため起動できません。"
+        exit 1
+    fi
 fi
 
 # サーバーIPを表示
