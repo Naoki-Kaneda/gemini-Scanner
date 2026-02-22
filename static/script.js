@@ -23,7 +23,20 @@ const MOTION_CANVAS_WIDTH = 64;      // モーション検出用キャンバス�
 const MOTION_CANVAS_HEIGHT = 48;     // モーション検出用キャンバス高さ
 const CAMERA_WIDTH = 1280;           // カメラ解像度（幅）
 const CAMERA_HEIGHT = 720;           // カメラ解像度（高さ）
-const JPEG_QUALITY = 0.95;           // キャプチャ画質
+const JPEG_QUALITY = 0.95;           // キャプチャ画質（デフォルト、モード別設定で上書き）
+
+// モード別の送信画像設定（解像度とJPEG品質）
+// maxWidth: 送信画像の最大幅（px）。元画像がこれ以下なら縮小しない
+// quality: JPEG品質（0.0〜1.0）。低いほどファイルサイズ小
+const MODE_IMAGE_CONFIG = {
+    text:     { maxWidth: null, quality: 0.95 },  // OCR: 高解像度・高品質を維持
+    label:    { maxWidth: null, quality: 0.95 },  // ラベル検出: テキスト読み取りに高解像度必要
+    face:     { maxWidth: 800,  quality: 0.85 },  // 顔検出: 中解像度で十分
+    logo:     { maxWidth: 800,  quality: 0.85 },  // ロゴ検出: 中解像度で十分
+    object:   { maxWidth: 640,  quality: 0.80 },  // 物体検出: 低解像度で十分
+    classify: { maxWidth: 640,  quality: 0.80 },  // 分類: 低解像度で十分
+    web:      { maxWidth: 640,  quality: 0.80 },  // Web検索: 低解像度で十分
+};
 const MIN_RESULT_LENGTH = 5;         // 結果フィルター: 最小文字数
 const LABEL_MAX_LENGTH = 25;         // バウンディングボックスのラベル最大文字数
 const RETRY_DELAY_MS = 10000;        // エラー後の再試行待機時間（ミリ秒）
@@ -794,11 +807,21 @@ async function captureAndAnalyze() {
     const srcW = sourceW * TARGET_BOX_RATIO;
     const srcH = sourceH * TARGET_BOX_HEIGHT;
 
-    canvas.width = srcW;
-    canvas.height = srcH;
-    ctx.drawImage(sourceEl, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+    // モード別に送信画像をリサイズ（通信量・トークン消費削減）
+    const imgConfig = MODE_IMAGE_CONFIG[currentMode] || MODE_IMAGE_CONFIG.text;
+    let dstW = srcW;
+    let dstH = srcH;
+    if (imgConfig.maxWidth && srcW > imgConfig.maxWidth) {
+        const scale = imgConfig.maxWidth / srcW;
+        dstW = Math.round(srcW * scale);
+        dstH = Math.round(srcH * scale);
+    }
 
-    const imageData = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    canvas.width = dstW;
+    canvas.height = dstH;
+    ctx.drawImage(sourceEl, srcX, srcY, srcW, srcH, 0, 0, dstW, dstH);
+
+    const imageData = canvas.toDataURL('image/jpeg', imgConfig.quality);
 
     // シングルショット: キャプチャ完了後、スキャンループを停止して解析待機状態に遷移
     isScanning = false;
