@@ -272,11 +272,13 @@ BOX_SCALE = 1000               # Gemini box_2d 座標の正規化スケール（
 def _build_thinking_config():
     """モデルに応じた thinkingConfig を返す。
 
-    Gemini 2.x系: thinkingBudget（トークン数指定）で制御。
-    Gemini 3.x系: thinkingLevel（レベル指定）が推奨。thinkingBudgetは互換扱い。
+    Gemini 2.x系: thinkingBudget（トークン数指定）で制御。0で思考を無効化。
+    Gemini 3.x系: thinkingLevel（レベル指定）が推奨。
+                   許可値は MINIMAL / LOW / MEDIUM / HIGH のみ。
+                   思考トークン消費を最小化するには MINIMAL を指定する。
     """
     if GEMINI_MODEL.startswith("gemini-3"):
-        return {"thinkingLevel": "NONE"}
+        return {"thinkingLevel": "MINIMAL"}
     return {"thinkingBudget": 0}
 
 
