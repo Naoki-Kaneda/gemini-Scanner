@@ -371,6 +371,112 @@ class TestImageSafetyCheck:
         mock_post.assert_not_called()
 
 
+# ─── thinking戦略テスト ──────────────────────────────
+class TestResolveThinkingConfig:
+    """_resolve_thinking_config のモデル名別テーブルテスト。"""
+
+    @pytest.mark.parametrize("model_name,expected", [
+        # Gemini 2.x Flash系: thinkingBudget: 0 で思考を無効化
+        ("gemini-2.5-flash", {"thinkingBudget": 0}),
+        ("gemini-2.0-flash", {"thinkingBudget": 0}),
+        ("gemini-2.5-flash-preview-05-20", {"thinkingBudget": 0}),
+        # Gemini 2.x Pro系: thinking無効化不可 → 空辞書
+        ("gemini-2.5-pro", {}),
+        ("gemini-2.5-pro-preview-05-06", {}),
+        # Gemini 3.x Flash系: thinkingLevel: MINIMAL
+        ("gemini-3.0-flash", {"thinkingLevel": "MINIMAL"}),
+        ("gemini-3-flash-preview", {"thinkingLevel": "MINIMAL"}),
+        # Gemini 3.x Pro系: thinkingLevel: LOW（MINIMAL非対応）
+        ("gemini-3.0-pro", {"thinkingLevel": "LOW"}),
+        ("gemini-3-pro-preview", {"thinkingLevel": "LOW"}),
+        # 未知モデル: 安全側 → 空辞書
+        ("unknown-model", {}),
+        ("gemini-4-ultra", {}),
+    ])
+    def test_モデル名に応じた正しいthinking設定を返す(self, model_name, expected):
+        """各モデル名に対して仕様準拠のthinkingConfigが返ること。"""
+        import gemini_api
+        original = gemini_api.GEMINI_MODEL
+        gemini_api.GEMINI_MODEL = model_name
+        try:
+            result = gemini_api._resolve_thinking_config()
+            assert result == expected, f"モデル '{model_name}' の期待値 {expected} に対し {result} が返された"
+        finally:
+            gemini_api.GEMINI_MODEL = original
+
+    def test_空辞書のときペイロードにthinkingConfigキーが含まれない(self):
+        """thinking設定が空辞書の場合、ペイロードからthinkingConfigが除外されること。"""
+        import gemini_api
+        original = gemini_api.GEMINI_MODEL
+        gemini_api.GEMINI_MODEL = "gemini-2.5-pro"  # 空辞書を返すモデル
+        try:
+            payload = gemini_api._build_gemini_payload(
+                make_b64(), mode="text", context_hint=""
+            )
+            assert "thinkingConfig" not in payload["generationConfig"]
+        finally:
+            gemini_api.GEMINI_MODEL = original
+
+    def test_非空辞書のときペイロードにthinkingConfigキーが含まれる(self):
+        """thinking設定が非空の場合、ペイロードにthinkingConfigが含まれること。"""
+        import gemini_api
+        original = gemini_api.GEMINI_MODEL
+        gemini_api.GEMINI_MODEL = "gemini-2.5-flash"  # thinkingBudget: 0 を返すモデル
+        try:
+            payload = gemini_api._build_gemini_payload(
+                make_b64(), mode="text", context_hint=""
+            )
+            assert "thinkingConfig" in payload["generationConfig"]
+            assert payload["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
+        finally:
+            gemini_api.GEMINI_MODEL = original
+
+
+# ─── parts結合テスト ───────────────────────────────
+class TestPartsJoining:
+    """レスポンスのparts結合でthought/非textパートが除外されることを検証する。"""
+
+    @patch("gemini_api.session.post")
+    def test_thoughtパートが結合から除外される(self, mock_post):
+        """thought: true のpartはJSON結合に含まれないこと。"""
+        response_data = {
+            "candidates": [{
+                "content": {
+                    "parts": [
+                        {"text": "thinking about this...", "thought": True},
+                        {"text": '{"texts": [{"text": "Hello", "box_2d": [0,0,500,500]}]}'},
+                    ]
+                },
+                "finishReason": "STOP",
+            }]
+        }
+        mock_post.return_value = make_mock_response(status_code=200, json_data=response_data)
+        from gemini_api import detect_content
+        result = detect_content(make_b64(), mode="text")
+        assert result["ok"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["label"] == "Hello"
+
+    @patch("gemini_api.session.post")
+    def test_text無しパートが結合から除外される(self, mock_post):
+        """functionCall等のtext無しpartが無視されること。"""
+        response_data = {
+            "candidates": [{
+                "content": {
+                    "parts": [
+                        {"functionCall": {"name": "some_func"}},
+                        {"text": '{"texts": []}'},
+                    ]
+                },
+                "finishReason": "STOP",
+            }]
+        }
+        mock_post.return_value = make_mock_response(status_code=200, json_data=response_data)
+        from gemini_api import detect_content
+        result = detect_content(make_b64(), mode="text")
+        assert result["ok"] is True
+
+
 # ─── get_proxy_status: 4パターン回帰テスト ──────────────
 class TestGetProxyStatus:
     """NO_PROXY_MODE と PROXY_URL の組み合わせ4パターンで get_proxy_status を検証する。"""
