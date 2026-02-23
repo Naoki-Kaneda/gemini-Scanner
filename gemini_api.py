@@ -480,6 +480,28 @@ def _resolve_pixel_bounds(box_2d, image_size):
     return []
 
 
+def _build_translated_label(en_name, ja_name, score, translations):
+    """英語名に日本語訳を付加したラベル文字列を構築する。
+
+    ja_nameが空の場合はtranslations辞書でフォールバックする。
+    翻訳が見つからない場合は英語名のみで表示する。
+
+    Args:
+        en_name: 英語名
+        ja_name: Geminiが返した日本語名（空の場合あり）
+        score: 確信度 (0.0〜1.0)
+        translations: フォールバック用翻訳辞書
+
+    Returns:
+        str: "EnName（日本語名）- 95%" 形式のラベル文字列
+    """
+    if not ja_name:
+        ja_name = translations.get(en_name.lower(), "")
+    if ja_name:
+        return f"{en_name}（{ja_name}）- {score:.0%}"
+    return f"{en_name} - {score:.0%}"
+
+
 # ─── 画像共通処理 ─────────────────────────────────
 def _open_image(image_b64):
     """
@@ -852,15 +874,7 @@ def _parse_gemini_object_response(gemini_data):
         en_name = obj.get("name", "")
         score = obj.get("score", 0)
         ja_name = obj.get("name_ja", "")
-
-        # 翻訳辞書でのフォールバック
-        if not ja_name:
-            ja_name = OBJECT_TRANSLATIONS.get(en_name.lower(), "")
-
-        if ja_name:
-            label = f"{en_name}（{ja_name}）- {score:.0%}"
-        else:
-            label = f"{en_name} - {score:.0%}"
+        label = _build_translated_label(en_name, ja_name, score, OBJECT_TRANSLATIONS)
 
         # box_2d → 正規化座標（0-1）に変換
         box_2d = obj.get("box_2d", [])
@@ -969,15 +983,7 @@ def _parse_gemini_classify_response(gemini_data):
         en_name = item.get("name", "")
         score = item.get("score", 0)
         ja_name = item.get("name_ja", "")
-
-        # 翻訳辞書でのフォールバック
-        if not ja_name:
-            ja_name = LABEL_TRANSLATIONS.get(en_name.lower(), "")
-
-        if ja_name:
-            label = f"{en_name}（{ja_name}）- {score:.0%}"
-        else:
-            label = f"{en_name} - {score:.0%}"
+        label = _build_translated_label(en_name, ja_name, score, LABEL_TRANSLATIONS)
 
         results.append({"label": label, "score": score})
 
