@@ -267,6 +267,8 @@ CONTRAST_FACTOR = 1.5          # コントラスト強調係数
 SHARPNESS_FACTOR = 1.5         # シャープネス強調係数（文字の輪郭を明確に）
 JPEG_QUALITY = 95              # JPEG保存品質
 BOX_SCALE = 1000               # Gemini box_2d 座標の正規化スケール（0〜1000）
+GENERATION_TEMPERATURE = 0.1   # 低温度で一貫した結果を得る
+SIGNIFICANT_EMOTION_LEVELS = frozenset({"POSSIBLE", "LIKELY", "VERY_LIKELY"})
 
 # ─── Thinking戦略テーブル ────────────────────────────
 # (世代プレフィックス, タイプキーワード) → thinkingConfig辞書
@@ -573,7 +575,7 @@ def _build_gemini_payload(image_b64, mode, context_hint=""):
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseSchema": MODE_SCHEMAS[mode],
-            "temperature": 0.1,  # 低温度で一貫した結果を得る
+            "temperature": GENERATION_TEMPERATURE,
         },
     }
 
@@ -893,10 +895,9 @@ def _parse_gemini_face_response(gemini_data, image_size):
         }
 
         # POSSIBLE以上の感情のみラベルに含める
-        significant_levels = {"POSSIBLE", "LIKELY", "VERY_LIKELY"}
         significant_emotions = []
         for emo_key, emo_value in emotions.items():
-            if emo_value in significant_levels:
+            if emo_value in SIGNIFICANT_EMOTION_LEVELS:
                 ja_name = EMOTION_NAMES.get(emo_key, emo_key)
                 ja_level = EMOTION_LIKELIHOOD.get(emo_value, emo_value)
                 significant_emotions.append(f"{ja_name}({ja_level})")
