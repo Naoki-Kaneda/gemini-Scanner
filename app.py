@@ -223,34 +223,23 @@ def add_security_headers(response):
 @app.errorhandler(413)
 def handle_request_too_large(_e):
     """リクエストボディが MAX_CONTENT_LENGTH を超えた場合のJSONレスポンス。"""
-    return jsonify({
-        "ok": False,
-        "data": [],
-        "error_code": ERR_REQUEST_TOO_LARGE,
-        "message": f"リクエストサイズが上限({MAX_REQUEST_BODY // (1024*1024)}MB)を超えています",
-    }), 413
+    return _error_response(
+        ERR_REQUEST_TOO_LARGE,
+        f"リクエストサイズが上限({MAX_REQUEST_BODY // (1024*1024)}MB)を超えています",
+        status_code=413,
+    )
 
 
 @app.errorhandler(400)
 def handle_bad_request(_e):
     """Flaskが投げる400エラーのJSONレスポンス。"""
-    return jsonify({
-        "ok": False,
-        "data": [],
-        "error_code": ERR_BAD_REQUEST,
-        "message": "不正なリクエストです",
-    }), 400
+    return _error_response(ERR_BAD_REQUEST, "不正なリクエストです", status_code=400)
 
 
 @app.errorhandler(405)
 def handle_method_not_allowed(_e):
     """許可されていないHTTPメソッドのJSONレスポンス。"""
-    return jsonify({
-        "ok": False,
-        "data": [],
-        "error_code": ERR_METHOD_NOT_ALLOWED,
-        "message": "許可されていないHTTPメソッドです",
-    }), 405
+    return _error_response(ERR_METHOD_NOT_ALLOWED, "許可されていないHTTPメソッドです", status_code=405)
 
 
 # ─── レートキー生成 ──────────────────────────────
@@ -264,6 +253,18 @@ def _build_rate_key():
 
 
 # ─── レスポンスヘルパー ────────────────────────────
+def _is_admin_authenticated():
+    """リクエストのX-Admin-Secretヘッダーで管理者認証を検証する。
+
+    Returns:
+        bool: ADMIN_SECRETが設定済みかつヘッダー値が一致すればTrue
+    """
+    if not ADMIN_SECRET:
+        return False
+    auth_header = request.headers.get("X-Admin-Secret", "")
+    return secrets.compare_digest(auth_header, ADMIN_SECRET)
+
+
 def _error_response(error_code, message, status_code=400, headers=None):
     """標準化されたエラーレスポンスを生成する。headersで追加HTTPヘッダーを指定可能。"""
     response = jsonify({
@@ -391,8 +392,7 @@ def get_usage():
 def get_proxy_config():
     """現在のプロキシ設定状態を返す（認証時はURL情報付き、未認証時はON/OFFのみ）"""
     status = get_proxy_status()
-    auth_header = request.headers.get("X-Admin-Secret", "")
-    if not ADMIN_SECRET or not secrets.compare_digest(auth_header, ADMIN_SECRET):
+    if not _is_admin_authenticated():
         return jsonify({"enabled": status["enabled"]})
     return jsonify(status)
 
@@ -400,8 +400,7 @@ def get_proxy_config():
 @app.route("/api/config/proxy", methods=["POST"])
 def update_proxy_config():
     """プロキシ設定を更新する（認証必須）"""
-    auth_header = request.headers.get("X-Admin-Secret", "")
-    if not ADMIN_SECRET or not secrets.compare_digest(auth_header, ADMIN_SECRET):
+    if not _is_admin_authenticated():
         return _error_response(ERR_UNAUTHORIZED, "管理APIへのアクセス権がありません", 403)
 
     if not request.is_json:
