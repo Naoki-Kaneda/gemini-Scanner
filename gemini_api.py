@@ -69,52 +69,44 @@ MODE_PROMPTS = {
     "text": (
         "この画像からすべてのテキストを検出してください。"
         "各テキストブロックのテキスト内容とバウンディングボックスを返してください。"
-        "box_2dは[ymin, xmin, ymax, xmax]形式で0-1000に正規化してください。"
-        "テキストが見つからない場合はtextsを空配列で返してください。"
     ),
     "object": (
         "この画像内のすべての物体を検出してください。"
-        "各物体の英語名(name)、日本語名(name_ja)、確信度score(0.0-1.0)、"
+        "各物体の英語名(name)、日本語名(name_ja)、確信度(score)、"
         "バウンディングボックス(box_2d)を返してください。"
-        "box_2dは[ymin, xmin, ymax, xmax]形式で0-1000に正規化してください。"
-        "最大10個まで検出してください。物体が見つからない場合はobjectsを空配列で返してください。"
+        "最大10個まで検出してください。"
     ),
     "label": (
         "この画像にラベル、テキスト、ステッカー、バーコード、QRコードなどが存在するか判定してください。"
         "テキストが読み取れる場合はその内容とバウンディングボックスも返してください。"
-        "box_2dは[ymin, xmin, ymax, xmax]形式で0-1000に正規化してください。"
         "label_detectedはラベルやテキストが存在すればtrue、なければfalseにしてください。"
-        "reasonには判定理由を日本語で記述してください。"
+        "reasonには判定理由を記述してください。"
     ),
     "face": (
         "この画像内のすべての顔を検出してください。"
-        "各顔のバウンディングボックス(box_2d)、検出確信度confidence(0.0-1.0)、"
-        "感情分析を返してください。"
+        "各顔のバウンディングボックス(box_2d)、検出確信度(confidence)、感情分析を返してください。"
         "感情はjoy, sorrow, anger, surpriseの4種類で、"
         "各レベルはVERY_UNLIKELY, UNLIKELY, POSSIBLE, LIKELY, VERY_LIKELYのいずれかで表してください。"
-        "box_2dは[ymin, xmin, ymax, xmax]形式で0-1000に正規化してください。"
-        "顔が見つからない場合はfacesを空配列で返してください。"
     ),
     "logo": (
         "この画像内のすべてのブランドロゴを検出してください。"
-        "各ロゴのブランド名(name)、確信度score(0.0-1.0)、"
-        "バウンディングボックス(box_2d)を返してください。"
-        "box_2dは[ymin, xmin, ymax, xmax]形式で0-1000に正規化してください。"
-        "ロゴが見つからない場合はlogosを空配列で返してください。"
+        "各ロゴのブランド名(name)、確信度(score)、バウンディングボックス(box_2d)を返してください。"
     ),
     "classify": (
         "この画像を分析し、最も関連性の高い分類タグを最大10個返してください。"
-        "各タグの英語名(name)、日本語名(name_ja)、確信度score(0.0-1.0)を含めてください。"
-        "タグが見つからない場合はlabelsを空配列で返してください。"
+        "各タグの英語名(name)、日本語名(name_ja)、確信度(score)を含めてください。"
     ),
     "web": (
         "この画像に映っている物や場所を詳しく識別してください。"
         "以下の情報を返してください："
         "1. best_guess: 画像の最も可能性の高い識別名（日本語）"
-        "2. entities: 関連するキーワードやエンティティ（最大5個、各名前nameと関連度score 0.0-1.0）"
+        "2. entities: 関連するキーワードやエンティティ（最大5個）"
         "3. description: 画像の詳細な説明（日本語）"
     ),
 }
+
+# ─── 感情レベル定義（JSON Schema enum制約用） ──────────────
+EMOTION_LEVELS = ["VERY_UNLIKELY", "UNLIKELY", "POSSIBLE", "LIKELY", "VERY_LIKELY"]
 
 MODE_SCHEMAS = {
     "text": {
@@ -144,7 +136,7 @@ MODE_SCHEMAS = {
                     "properties": {
                         "name": {"type": "STRING"},
                         "name_ja": {"type": "STRING"},
-                        "score": {"type": "NUMBER"},
+                        "score": {"type": "NUMBER", "minimum": 0, "maximum": 1},
                         "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                     },
                     "required": ["name", "score", "box_2d"],
@@ -181,11 +173,11 @@ MODE_SCHEMAS = {
                     "type": "OBJECT",
                     "properties": {
                         "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
-                        "confidence": {"type": "NUMBER"},
-                        "joy": {"type": "STRING"},
-                        "sorrow": {"type": "STRING"},
-                        "anger": {"type": "STRING"},
-                        "surprise": {"type": "STRING"},
+                        "confidence": {"type": "NUMBER", "minimum": 0, "maximum": 1},
+                        "joy": {"type": "STRING", "enum": EMOTION_LEVELS},
+                        "sorrow": {"type": "STRING", "enum": EMOTION_LEVELS},
+                        "anger": {"type": "STRING", "enum": EMOTION_LEVELS},
+                        "surprise": {"type": "STRING", "enum": EMOTION_LEVELS},
                     },
                     "required": ["box_2d", "confidence", "joy", "sorrow", "anger", "surprise"],
                 },
@@ -202,7 +194,7 @@ MODE_SCHEMAS = {
                     "type": "OBJECT",
                     "properties": {
                         "name": {"type": "STRING"},
-                        "score": {"type": "NUMBER"},
+                        "score": {"type": "NUMBER", "minimum": 0, "maximum": 1},
                         "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                     },
                     "required": ["name", "score", "box_2d"],
@@ -221,7 +213,7 @@ MODE_SCHEMAS = {
                     "properties": {
                         "name": {"type": "STRING"},
                         "name_ja": {"type": "STRING"},
-                        "score": {"type": "NUMBER"},
+                        "score": {"type": "NUMBER", "minimum": 0, "maximum": 1},
                     },
                     "required": ["name", "score"],
                 },
@@ -239,7 +231,7 @@ MODE_SCHEMAS = {
                     "type": "OBJECT",
                     "properties": {
                         "name": {"type": "STRING"},
-                        "score": {"type": "NUMBER"},
+                        "score": {"type": "NUMBER", "minimum": 0, "maximum": 1},
                     },
                     "required": ["name", "score"],
                 },
@@ -270,6 +262,15 @@ JPEG_QUALITY = 95              # JPEG保存品質
 BOX_SCALE = 1000               # Gemini box_2d 座標の正規化スケール（0〜1000）
 GENERATION_TEMPERATURE = 0.1   # 低温度で一貫した結果を得る
 SIGNIFICANT_EMOTION_LEVELS = frozenset({"POSSIBLE", "LIKELY", "VERY_LIKELY"})
+
+# ─── System Instruction（全モード共通制約） ──────────────
+_SYSTEM_INSTRUCTION = (
+    "あなたは画像解析AIです。以下の共通ルールに従ってJSON形式で応答してください。\n"
+    "- バウンディングボックス(box_2d)は[ymin, xmin, ymax, xmax]形式で、値を0〜1000に正規化してください。\n"
+    "- 確信度・関連度(score/confidence)は0.0〜1.0の範囲で返してください。\n"
+    "- 該当データが見つからない場合は対応する配列を空で返してください。\n"
+    "- 日本語での記述が求められるフィールドは自然な日本語で記述してください。"
+)
 
 # ─── Thinking戦略テーブル ────────────────────────────
 # (世代プレフィックス, タイプキーワード) → thinkingConfig辞書
@@ -595,6 +596,9 @@ def _build_gemini_payload(image_b64, mode, context_hint=""):
         prompt += f"\n\n追加コンテキスト: {context_hint}"
 
     payload = {
+        "system_instruction": {
+            "parts": [{"text": _SYSTEM_INSTRUCTION}],
+        },
         "contents": [
             {
                 "parts": [

@@ -751,3 +751,103 @@ class TestEnsureJpeg:
         result_b64 = _ensure_jpeg(jpeg_b64, enhance=False)
         decoded = base64.b64decode(result_b64)
         assert decoded[:3] == b'\xff\xd8\xff', "JPEG→JPEG変換で出力がJPEGでない"
+
+
+# ─── System Instruction テスト ──────────────────────────
+class TestSystemInstruction:
+    """_build_gemini_payload の system_instruction フィールドを検証する。"""
+
+    def test_ペイロードにsystem_instructionフィールドが全モードで含まれる(self):
+        """全モードのペイロードにsystem_instructionが存在すること。"""
+        import gemini_api
+        for mode in gemini_api.VALID_MODES:
+            payload = gemini_api._build_gemini_payload(
+                make_b64(), mode=mode, context_hint=""
+            )
+            assert "system_instruction" in payload, f"{mode}モードにsystem_instructionがない"
+
+    def test_system_instructionの構造が正しい(self):
+        """system_instruction.parts[0].text が非空文字列であること。"""
+        import gemini_api
+        payload = gemini_api._build_gemini_payload(
+            make_b64(), mode="text", context_hint=""
+        )
+        si = payload["system_instruction"]
+        assert "parts" in si
+        assert len(si["parts"]) == 1
+        assert "text" in si["parts"][0]
+        assert isinstance(si["parts"][0]["text"], str)
+        assert len(si["parts"][0]["text"]) > 0
+
+    def test_system_instructionにbox_2d共通ルールが含まれる(self):
+        """system_instructionにバウンディングボックスの共通ルールが記載されていること。"""
+        import gemini_api
+        payload = gemini_api._build_gemini_payload(
+            make_b64(), mode="text", context_hint=""
+        )
+        text = payload["system_instruction"]["parts"][0]["text"]
+        assert "box_2d" in text
+        assert "0〜1000" in text
+
+    def test_contentsの構造が変わらない(self):
+        """system_instruction追加後もcontents[0].parts構造が維持されること。"""
+        import gemini_api
+        payload = gemini_api._build_gemini_payload(
+            make_b64(), mode="object", context_hint=""
+        )
+        assert "contents" in payload
+        parts = payload["contents"][0]["parts"]
+        assert "inlineData" in parts[0]
+        assert "text" in parts[1]
+
+    def test_context_hintがモードプロンプトに追記される(self):
+        """context_hintはsystem_instructionではなくモード別プロンプトに追記されること。"""
+        import gemini_api
+        payload = gemini_api._build_gemini_payload(
+            make_b64(), mode="text", context_hint="テスト用ヒント"
+        )
+        si_text = payload["system_instruction"]["parts"][0]["text"]
+        assert "テスト用ヒント" not in si_text
+        prompt_text = payload["contents"][0]["parts"][1]["text"]
+        assert "テスト用ヒント" in prompt_text
+
+
+# ─── スキーマEnum・範囲制約テスト ─────────────────────────
+class TestSchemaConstraints:
+    """MODE_SCHEMAS の enum/min/max 制約を検証する。"""
+
+    def test_EMOTION_LEVELS定数が5段階を含む(self):
+        """EMOTION_LEVELS が正しい5段階であること。"""
+        from gemini_api import EMOTION_LEVELS
+        assert EMOTION_LEVELS == [
+            "VERY_UNLIKELY", "UNLIKELY", "POSSIBLE", "LIKELY", "VERY_LIKELY"
+        ]
+
+    def test_faceスキーマの感情フィールドにenumが設定されている(self):
+        """joy/sorrow/anger/surprise に EMOTION_LEVELS の enum 制約があること。"""
+        from gemini_api import MODE_SCHEMAS, EMOTION_LEVELS
+        face_props = MODE_SCHEMAS["face"]["properties"]["faces"]["items"]["properties"]
+        for emotion in ["joy", "sorrow", "anger", "surprise"]:
+            assert "enum" in face_props[emotion], f"{emotion}にenumがない"
+            assert face_props[emotion]["enum"] == EMOTION_LEVELS
+
+    def test_faceスキーマのconfidenceに範囲制約がある(self):
+        """face.confidence に minimum=0, maximum=1 があること。"""
+        from gemini_api import MODE_SCHEMAS
+        conf = MODE_SCHEMAS["face"]["properties"]["faces"]["items"]["properties"]["confidence"]
+        assert conf.get("minimum") == 0
+        assert conf.get("maximum") == 1
+
+    @pytest.mark.parametrize("mode,array_key", [
+        ("object", "objects"),
+        ("logo", "logos"),
+        ("classify", "labels"),
+        ("web", "entities"),
+    ])
+    def test_scoreフィールドに範囲制約がある(self, mode, array_key):
+        """各モードのscore NUMBERフィールドに minimum=0, maximum=1 があること。"""
+        from gemini_api import MODE_SCHEMAS
+        items = MODE_SCHEMAS[mode]["properties"][array_key]["items"]["properties"]
+        score = items["score"]
+        assert score.get("minimum") == 0, f"{mode}.{array_key}.score に minimum がない"
+        assert score.get("maximum") == 1, f"{mode}.{array_key}.score に maximum がない"
