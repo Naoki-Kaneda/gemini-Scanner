@@ -275,7 +275,7 @@ _THINKING_STRATEGY_TABLE = {
     ("gemini-2", "flash"): {"thinkingBudget": 0},       # 思考無効化
     ("gemini-2", "pro"):   {},                           # 無効化不可 → 設定を送らない
     ("gemini-3", "flash"): {"thinkingLevel": "MINIMAL"}, # 最小思考
-    ("gemini-3", "pro"):   {"thinkingLevel": "LOW"},     # MINIMAL非対応のため LOW
+    ("gemini-3", "pro"):   {"thinkingLevel": "MINIMAL"}, # 最小思考（公式でMINIMAL対応確認済み）
 }
 
 _warned_unknown_model = set()  # 未知モデル警告の重複抑制

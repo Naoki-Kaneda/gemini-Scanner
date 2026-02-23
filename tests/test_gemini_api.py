@@ -386,9 +386,9 @@ class TestResolveThinkingConfig:
         # Gemini 3.x Flash系: thinkingLevel: MINIMAL
         ("gemini-3.0-flash", {"thinkingLevel": "MINIMAL"}),
         ("gemini-3-flash-preview", {"thinkingLevel": "MINIMAL"}),
-        # Gemini 3.x Pro系: thinkingLevel: LOW（MINIMAL非対応）
-        ("gemini-3.0-pro", {"thinkingLevel": "LOW"}),
-        ("gemini-3-pro-preview", {"thinkingLevel": "LOW"}),
+        # Gemini 3.x Pro系: thinkingLevel: MINIMAL（公式でMINIMAL対応確認済み）
+        ("gemini-3.0-pro", {"thinkingLevel": "MINIMAL"}),
+        ("gemini-3-pro-preview", {"thinkingLevel": "MINIMAL"}),
         # 未知モデル: 安全側 → 空辞書
         ("unknown-model", {}),
         ("gemini-4-ultra", {}),
