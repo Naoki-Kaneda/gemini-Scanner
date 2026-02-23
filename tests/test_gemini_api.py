@@ -692,77 +692,29 @@ class TestMimeConsistency:
         """テスト用PNG画像のBase64文字列。"""
         return create_valid_png_base64()
 
+    @pytest.mark.parametrize("mode,empty_response", [
+        ("object", {"objects": []}),
+        ("face", {"faces": []}),
+        ("logo", {"logos": []}),
+        ("classify", {"labels": []}),
+        ("web", {"best_guess": "テスト", "entities": []}),
+    ])
     @patch("gemini_api.session.post")
-    def test_objectモードでPNG入力がJPEG変換される(self, mock_post, png_b64):
-        """objectモードでPNG画像を送ると_ensure_jpegでJPEG変換されること。"""
-        mock_post.return_value = make_gemini_response({"objects": []})
+    def test_PNG入力が全モードでJPEG変換される(self, mock_post, png_b64, mode, empty_response):
+        """各モードでPNG画像を送ると_ensure_jpegでJPEG変換されること。"""
+        mock_post.return_value = make_gemini_response(empty_response)
         from gemini_api import detect_content
-        result = detect_content(png_b64, mode="object")
-        assert result["ok"] is True
-        # API送信ペイロードのmimeTypeがimage/jpegであること
-        call_kwargs = mock_post.call_args
-        payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        mime_type = payload["contents"][0]["parts"][0]["inlineData"]["mimeType"]
-        assert mime_type == "image/jpeg"
-
-    @patch("gemini_api.session.post")
-    def test_faceモードでPNG入力がJPEG変換される(self, mock_post, png_b64):
-        """faceモードでPNG画像を送ると_ensure_jpegでJPEG変換されること。"""
-        mock_post.return_value = make_gemini_response({"faces": []})
-        from gemini_api import detect_content
-        result = detect_content(png_b64, mode="face")
+        result = detect_content(png_b64, mode=mode)
         assert result["ok"] is True
         call_kwargs = mock_post.call_args
         payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        sent_data = payload["contents"][0]["parts"][0]["inlineData"]["data"]
+        inline_data = payload["contents"][0]["parts"][0]["inlineData"]
+        # MIMEタイプがimage/jpegであること
+        assert inline_data["mimeType"] == "image/jpeg", f"{mode}モードでMIMEタイプがimage/jpegでない"
         # 変換後のデータがJPEGマジックバイトで始まること
         import base64
-        decoded = base64.b64decode(sent_data)
-        assert decoded[:3] == b'\xff\xd8\xff', "JPEG変換後のバイナリがJPEGヘッダーで始まること"
-
-    @patch("gemini_api.session.post")
-    def test_logoモードでPNG入力がJPEG変換される(self, mock_post, png_b64):
-        """logoモードでPNG画像を送ると_ensure_jpegでJPEG変換されること。"""
-        mock_post.return_value = make_gemini_response({"logos": []})
-        from gemini_api import detect_content
-        result = detect_content(png_b64, mode="logo")
-        assert result["ok"] is True
-        call_kwargs = mock_post.call_args
-        payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        sent_data = payload["contents"][0]["parts"][0]["inlineData"]["data"]
-        import base64
-        decoded = base64.b64decode(sent_data)
-        assert decoded[:3] == b'\xff\xd8\xff'
-
-    @patch("gemini_api.session.post")
-    def test_classifyモードでPNG入力がJPEG変換される(self, mock_post, png_b64):
-        """classifyモードでPNG画像を送ると_ensure_jpegでJPEG変換されること。"""
-        mock_post.return_value = make_gemini_response({"labels": []})
-        from gemini_api import detect_content
-        result = detect_content(png_b64, mode="classify")
-        assert result["ok"] is True
-        call_kwargs = mock_post.call_args
-        payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        sent_data = payload["contents"][0]["parts"][0]["inlineData"]["data"]
-        import base64
-        decoded = base64.b64decode(sent_data)
-        assert decoded[:3] == b'\xff\xd8\xff'
-
-    @patch("gemini_api.session.post")
-    def test_webモードでPNG入力がJPEG変換される(self, mock_post, png_b64):
-        """webモードでPNG画像を送ると_ensure_jpegでJPEG変換されること。"""
-        mock_post.return_value = make_gemini_response({
-            "best_guess": "テスト", "entities": [],
-        })
-        from gemini_api import detect_content
-        result = detect_content(png_b64, mode="web")
-        assert result["ok"] is True
-        call_kwargs = mock_post.call_args
-        payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        sent_data = payload["contents"][0]["parts"][0]["inlineData"]["data"]
-        import base64
-        decoded = base64.b64decode(sent_data)
-        assert decoded[:3] == b'\xff\xd8\xff'
+        decoded = base64.b64decode(inline_data["data"])
+        assert decoded[:3] == b'\xff\xd8\xff', f"{mode}モードでJPEG変換されていない"
 
 
 # ─── _ensure_jpeg 回帰テスト ────────────────────────

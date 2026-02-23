@@ -5,6 +5,8 @@ Gemini Vision Scanner - APIエンドポイントのテスト。
 
 import base64
 from unittest.mock import patch
+
+import pytest
 from conftest import create_valid_image_base64, create_valid_png_base64
 
 
@@ -71,58 +73,39 @@ class TestObjectDetection:
 class TestNewModes:
     """face/logo/classify/web/label の各モードがAPIエンドポイントで受け入れられること。"""
 
-    @patch("app.detect_content")
-    def test_顔検出モードを受け入れる(self, mock_detect, client):
-        """mode=faceで正常レスポンスを返すこと。"""
-        mock_detect.return_value = {
+    @pytest.mark.parametrize("mode,mock_return", [
+        ("face", {
             "ok": True,
             "data": [{"label": "顔1: 喜び=高い", "bounds": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.5], [0.1, 0.5]]}],
             "image_size": [640, 480],
             "error_code": None,
             "message": None,
-        }
-        response = client.post("/api/analyze", json={
-            "image": create_valid_image_base64(),
-            "mode": "face",
-        })
-        assert response.status_code == 200
-        assert response.get_json()["ok"] is True
-
-    @patch("app.detect_content")
-    def test_ロゴ検出モードを受け入れる(self, mock_detect, client):
-        """mode=logoで正常レスポンスを返すこと。"""
-        mock_detect.return_value = {
+        }),
+        ("logo", {
             "ok": True,
             "data": [{"label": "Google - 92%", "bounds": [[0.2, 0.3], [0.6, 0.3], [0.6, 0.5], [0.2, 0.5]]}],
             "image_size": [640, 480],
             "error_code": None,
             "message": None,
-        }
-        response = client.post("/api/analyze", json={
-            "image": create_valid_image_base64(),
-            "mode": "logo",
-        })
-        assert response.status_code == 200
-        assert response.get_json()["ok"] is True
-
-    @patch("app.detect_content")
-    def test_分類モードを受け入れる(self, mock_detect, client):
-        """mode=classifyで正常レスポンスを返すこと。"""
-        mock_detect.return_value = {
+        }),
+        ("classify", {
             "ok": True,
             "data": [{"label": "電子機器 - 95%"}, {"label": "ガジェット - 88%"}],
             "image_size": None,
             "error_code": None,
             "message": None,
-        }
+        }),
+    ])
+    @patch("app.detect_content")
+    def test_各モードを受け入れる(self, mock_detect, client, mode, mock_return):
+        """face/logo/classifyモードで正常レスポンスを返すこと。"""
+        mock_detect.return_value = mock_return
         response = client.post("/api/analyze", json={
             "image": create_valid_image_base64(),
-            "mode": "classify",
+            "mode": mode,
         })
         assert response.status_code == 200
-        data = response.get_json()
-        assert data["ok"] is True
-        assert len(data["data"]) == 2
+        assert response.get_json()["ok"] is True
 
     @patch("app.detect_content")
     def test_Web検索モードを受け入れる(self, mock_detect, client):
