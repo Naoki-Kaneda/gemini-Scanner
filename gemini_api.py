@@ -465,6 +465,21 @@ def _gemini_box_to_normalized_vertices(box_2d):
     ]
 
 
+def _resolve_pixel_bounds(box_2d, image_size):
+    """box_2dとimage_sizeが有効な場合のみピクセル座標に変換する。
+
+    Args:
+        box_2d: [ymin, xmin, ymax, xmax] 0〜BOX_SCALE、または空リスト
+        image_size: [width, height] または None
+
+    Returns:
+        [[x,y], ...] ピクセル座標4頂点、変換不可の場合は空リスト
+    """
+    if image_size and box_2d:
+        return _gemini_box_to_pixel_vertices(box_2d, image_size[0], image_size[1])
+    return []
+
+
 # ─── 画像共通処理 ─────────────────────────────────
 def _open_image(image_b64):
     """
@@ -781,11 +796,7 @@ def _parse_gemini_text_response(gemini_data, image_size):
         text = item.get("text", "").strip()
         if not text:
             continue
-        box_2d = item.get("box_2d", [])
-        if image_size and box_2d:
-            bounds = _gemini_box_to_pixel_vertices(box_2d, image_size[0], image_size[1])
-        else:
-            bounds = []
+        bounds = _resolve_pixel_bounds(item.get("box_2d", []), image_size)
         results.append({"label": text, "bounds": bounds})
 
     return results
@@ -812,11 +823,7 @@ def _parse_gemini_label_response(gemini_data, image_size):
         text = item.get("text", "").strip()
         if not text:
             continue
-        box_2d = item.get("box_2d", [])
-        if image_size and box_2d:
-            bounds = _gemini_box_to_pixel_vertices(box_2d, image_size[0], image_size[1])
-        else:
-            bounds = []
+        bounds = _resolve_pixel_bounds(item.get("box_2d", []), image_size)
         results.append({"label": text, "bounds": bounds})
 
     if not reason:
@@ -906,11 +913,7 @@ def _parse_gemini_face_response(gemini_data, image_size):
         label = f"顔{idx}: {emotion_text} - {confidence:.0%}"
 
         # box_2d → ピクセル座標に変換
-        box_2d = face.get("box_2d", [])
-        if image_size and box_2d:
-            bounds = _gemini_box_to_pixel_vertices(box_2d, image_size[0], image_size[1])
-        else:
-            bounds = []
+        bounds = _resolve_pixel_bounds(face.get("box_2d", []), image_size)
 
         results.append({
             "label": label,
@@ -942,11 +945,7 @@ def _parse_gemini_logo_response(gemini_data, image_size):
         label = f"{name} - {score:.0%}"
 
         # box_2d → ピクセル座標に変換
-        box_2d = logo.get("box_2d", [])
-        if image_size and box_2d:
-            bounds = _gemini_box_to_pixel_vertices(box_2d, image_size[0], image_size[1])
-        else:
-            bounds = []
+        bounds = _resolve_pixel_bounds(logo.get("box_2d", []), image_size)
 
         results.append({"label": label, "bounds": bounds})
 
