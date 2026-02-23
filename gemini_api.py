@@ -625,6 +625,132 @@ def _build_gemini_payload(image_b64, mode, context_hint=""):
 
 
 # ─── API呼び出し ──────────────────────────────────
+def _send_gemini_request(api_url, payload, request_id, mode):
+    """Gemini APIにリクエストを送信し、429リトライを処理する。
+
+    Args:
+        api_url: Gemini APIエンドポイントURL
+        payload: リクエストペイロード辞書
+        request_id: ログ追跡用リクエストID
+        mode: 検出モード（ログ用）
+
+    Returns:
+        tuple: (response_json_dict, None) 成功時
+               (None, error_response_dict) 失敗時
+    """
+    api_headers = {
+        "x-goog-api-key": API_KEY,
+        "Content-Type": "application/json",
+    }
+    response = None
+    for attempt in range(GEMINI_429_MAX_RETRIES + 1):
+        response = session.post(
+            api_url, json=payload, headers=api_headers, timeout=API_TIMEOUT_SECONDS
+        )
+        if response.status_code != 429:
+            break
+
+        if attempt >= GEMINI_429_MAX_RETRIES:
+            logger.warning(
+                "[%s] レート制限 (mode=%s, attempts=%d): %.300s",
+                request_id, mode, attempt + 1, response.text,
+            )
+            return None, _make_error(
+                "GEMINI_RATE_LIMITED",
+                "Gemini APIレート制限中です。しばらく待ってから再試行してください。",
+            )
+
+        fallback_wait = GEMINI_429_BACKOFF_BASE_SECONDS * (2 ** attempt)
+        sleep_seconds = _get_retry_after_seconds(response, fallback_wait)
+        logger.info(
+            "[%s] Gemini 429を受信したためリトライします (mode=%s, attempt=%d/%d, wait=%.2fs)",
+            request_id, mode, attempt + 1, GEMINI_429_MAX_RETRIES + 1, sleep_seconds,
+        )
+        time.sleep(sleep_seconds)
+
+    if response.status_code != 200:
+        logger.error(
+            "[%s] APIエラー (mode=%s, ステータス %d): %.500s",
+            request_id, mode, response.status_code, response.text,
+        )
+        return None, _make_error(
+            f"API_{response.status_code}",
+            f"Gemini APIエラー (ステータス {response.status_code})",
+        )
+
+    try:
+        result = response.json()
+    except (ValueError, TypeError) as parse_err:
+        content_type = response.headers.get("Content-Type", "不明")
+        logger.error(
+            "[%s] APIレスポンスのJSONパースに失敗 (mode=%s, content-type=%s): %s (先頭200文字: %.200s)",
+            request_id, mode, content_type, parse_err, response.text,
+        )
+        error_code = ERR_API_RESPONSE_NOT_JSON if "json" not in content_type.lower() else ERR_PARSE_ERROR
+        return None, _make_error(error_code, f"APIレスポンスの解析に失敗しました (Content-Type: {content_type})")
+
+    return result, None
+
+
+def _extract_gemini_content(api_result, request_id, mode):
+    """Gemini APIレスポンスからコンテンツJSONを抽出する。
+
+    candidates/finishReason/parts結合/JSONパースを処理する。
+
+    Args:
+        api_result: Gemini APIが返したレスポンス辞書
+        request_id: ログ追跡用リクエストID
+        mode: 検出モード（ログ用）
+
+    Returns:
+        tuple: (gemini_data_dict, None) 成功時
+               (None, response_dict) 空データまたはエラー時
+    """
+    candidates = api_result.get("candidates", [])
+    if not candidates:
+        prompt_feedback = api_result.get("promptFeedback", {})
+        block_reason = prompt_feedback.get("blockReason", "")
+        if block_reason:
+            logger.warning("[%s] Gemini: プロンプトがブロックされました (reason=%s)", request_id, block_reason)
+            return None, _make_error(ERR_SAFETY_BLOCKED, f"画像が安全フィルターによりブロックされました ({block_reason})")
+        return None, _make_success([])
+
+    candidate = candidates[0]
+
+    finish_reason = candidate.get("finishReason", "STOP")
+    if finish_reason == "SAFETY":
+        logger.warning("[%s] Gemini: 安全フィルターにより停止 (mode=%s)", request_id, mode)
+        return None, _make_error(ERR_SAFETY_BLOCKED, "画像が安全フィルターによりブロックされました")
+    if finish_reason in ("MAX_TOKENS", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"):
+        logger.warning("[%s] Gemini: 異常終了 finishReason=%s (mode=%s)", request_id, finish_reason, mode)
+        return None, _make_error("INCOMPLETE_RESPONSE", f"応答が不完全です (理由: {finish_reason})")
+
+    parts = candidate.get("content", {}).get("parts", [])
+    if not parts:
+        return None, _make_success([])
+
+    # 複数partにテキストが分割される場合があるため全partを結合する
+    # 除外対象:
+    #   - thought=True のpart（思考過程テキスト。JSON本文に混ぜると解析が壊れる）
+    #   - text が無いpart（functionCall等の非テキスト応答）
+    raw_text = "".join(
+        p.get("text", "") for p in parts
+        if p.get("text") and not p.get("thought")
+    )
+    if not raw_text.strip():
+        return None, _make_success([])
+
+    try:
+        gemini_data = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        logger.error("[%s] Gemini レスポンスのJSONパースに失敗 (mode=%s): %s (先頭200文字: %.200s)",
+                     request_id, mode, e, raw_text)
+        return None, _make_error(ERR_PARSE_ERROR, "Geminiレスポンスの解析に失敗しました")
+
+    logger.info("Gemini API レスポンス keys: %s (mode=%s)", list(gemini_data.keys()), mode)
+    return gemini_data, None
+
+
 def detect_content(image_b64, mode="text", request_id="", context_hint=""):
     """
     Google Gemini APIで画像解析を行う。
@@ -682,105 +808,15 @@ def detect_content(image_b64, mode="text", request_id="", context_hint=""):
     api_url = f"{API_BASE_URL}{GEMINI_MODEL}:generateContent"
 
     try:
-        # APIキーはヘッダーで送信（URLパラメータだとプロキシログに記録されるリスク回避）
-        api_headers = {
-            "x-goog-api-key": API_KEY,
-            "Content-Type": "application/json",
-        }
-        response = None
-        for attempt in range(GEMINI_429_MAX_RETRIES + 1):
-            response = session.post(
-                api_url, json=payload, headers=api_headers, timeout=API_TIMEOUT_SECONDS
-            )
-            if response.status_code != 429:
-                break
+        # HTTP通信 + 429リトライ
+        api_result, api_error = _send_gemini_request(api_url, payload, request_id, mode)
+        if api_error:
+            return api_error
 
-            if attempt >= GEMINI_429_MAX_RETRIES:
-                logger.warning(
-                    "[%s] レート制限 (mode=%s, attempts=%d): %.300s",
-                    request_id, mode, attempt + 1, response.text,
-                )
-                return _make_error(
-                    "GEMINI_RATE_LIMITED",
-                    "Gemini APIレート制限中です。しばらく待ってから再試行してください。",
-                )
-
-            fallback_wait = GEMINI_429_BACKOFF_BASE_SECONDS * (2 ** attempt)
-            sleep_seconds = _get_retry_after_seconds(response, fallback_wait)
-            logger.info(
-                "[%s] Gemini 429を受信したためリトライします (mode=%s, attempt=%d/%d, wait=%.2fs)",
-                request_id, mode, attempt + 1, GEMINI_429_MAX_RETRIES + 1, sleep_seconds,
-            )
-            time.sleep(sleep_seconds)
-
-        if response.status_code != 200:
-            logger.error(
-                "[%s] APIエラー (mode=%s, ステータス %d): %.500s",
-                request_id, mode, response.status_code, response.text,
-            )
-            return _make_error(
-                f"API_{response.status_code}",
-                f"Gemini APIエラー (ステータス {response.status_code})",
-            )
-
-        try:
-            result = response.json()
-        except (ValueError, TypeError) as parse_err:
-            content_type = response.headers.get("Content-Type", "不明")
-            logger.error(
-                "[%s] APIレスポンスのJSONパースに失敗 (mode=%s, content-type=%s): %s (先頭200文字: %.200s)",
-                request_id, mode, content_type, parse_err, response.text,
-            )
-            error_code = ERR_API_RESPONSE_NOT_JSON if "json" not in content_type.lower() else ERR_PARSE_ERROR
-            return _make_error(error_code, f"APIレスポンスの解析に失敗しました (Content-Type: {content_type})")
-
-        # Geminiレスポンスの解析
-        candidates = result.get("candidates", [])
-        if not candidates:
-            # promptFeedback にブロック理由がある場合
-            prompt_feedback = result.get("promptFeedback", {})
-            block_reason = prompt_feedback.get("blockReason", "")
-            if block_reason:
-                logger.warning("[%s] Gemini: プロンプトがブロックされました (reason=%s)", request_id, block_reason)
-                return _make_error(ERR_SAFETY_BLOCKED, f"画像が安全フィルターによりブロックされました ({block_reason})")
-            return _make_success([])
-
-        candidate = candidates[0]
-
-        # finishReason チェック
-        finish_reason = candidate.get("finishReason", "STOP")
-        if finish_reason == "SAFETY":
-            logger.warning("[%s] Gemini: 安全フィルターにより停止 (mode=%s)", request_id, mode)
-            return _make_error(ERR_SAFETY_BLOCKED, "画像が安全フィルターによりブロックされました")
-        if finish_reason in ("MAX_TOKENS", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"):
-            logger.warning("[%s] Gemini: 異常終了 finishReason=%s (mode=%s)", request_id, finish_reason, mode)
-            return _make_error("INCOMPLETE_RESPONSE", f"応答が不完全です (理由: {finish_reason})")
-
-        # テキスト部分を取得
-        parts = candidate.get("content", {}).get("parts", [])
-        if not parts:
-            return _make_success([])
-
-        # 複数partにテキストが分割される場合があるため全partを結合する
-        # 除外対象:
-        #   - thought=True のpart（思考過程テキスト。JSON本文に混ぜると解析が壊れる）
-        #   - text が無いpart（functionCall等の非テキスト応答）
-        raw_text = "".join(
-            p.get("text", "") for p in parts
-            if p.get("text") and not p.get("thought")
-        )
-        if not raw_text.strip():
-            return _make_success([])
-
-        # JSONパース
-        try:
-            gemini_data = json.loads(raw_text)
-        except json.JSONDecodeError as e:
-            logger.error("[%s] Gemini レスポンスのJSONパースに失敗 (mode=%s): %s (先頭200文字: %.200s)",
-                         request_id, mode, e, raw_text)
-            return _make_error(ERR_PARSE_ERROR, "Geminiレスポンスの解析に失敗しました")
-
-        logger.info("Gemini API レスポンス keys: %s (mode=%s)", list(gemini_data.keys()), mode)
+        # Geminiレスポンスの解析（candidates/parts/JSONパース）
+        gemini_data, parse_result = _extract_gemini_content(api_result, request_id, mode)
+        if parse_result:
+            return parse_result
 
         # モード別パーサーでレスポンスを変換
         return _dispatch_mode_handler(mode, gemini_data, image_b64)
