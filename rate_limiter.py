@@ -3,11 +3,14 @@
 Redis（マルチプロセス対応）またはインメモリ（シングルプロセス用フォールバック）を自動選択する。
 """
 
+from __future__ import annotations
+
 import os
 import time
 import uuid
 import logging
 from threading import Lock
+from typing import Optional, Protocol, Tuple
 
 from dotenv import load_dotenv
 
@@ -29,6 +32,14 @@ _MSG_MINUTE_EXCEEDED = f"リクエスト頻度が高すぎます（上限: {RATE
 def _today_key():
     """本日の日付キー文字列を返す（YYYY-MM-DD形式）。"""
     return time.strftime("%Y-%m-%d")
+
+
+class RateLimiterBackend(Protocol):
+    """レート制限バックエンドのインターフェース仕様（構造的部分型）。"""
+
+    def try_consume(self, client_ip: str) -> Tuple[bool, str, Optional[str]]: ...
+    def release(self, client_ip: str, request_id: str) -> None: ...
+    def get_daily_count(self, client_ip: str) -> int: ...
 
 
 def _seconds_until_midnight():
@@ -220,10 +231,10 @@ class InMemoryRateLimiter:
 
 
 # ─── バックエンド選択・公開API ─────────────────────
-_backend = None
+_backend: Optional[RateLimiterBackend] = None
 
 
-def _get_backend():
+def _get_backend() -> RateLimiterBackend:
     """設定に基づいてバックエンドを初期化・取得する（遅延初期化）。"""
     global _backend
     if _backend is not None:
