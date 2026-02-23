@@ -1036,13 +1036,13 @@ def _parse_gemini_web_response(gemini_data):
 # ─── モード別ディスパッチ ──────────────────────────
 # 各モードのパーサー・image_size要否・ログラベルを一元管理
 _MODE_HANDLERS = {
-    "text":     {"parser": "_parse_gemini_text_response",     "needs_image_size": True,  "log": "テキスト検出"},
-    "object":   {"parser": "_parse_gemini_object_response",   "needs_image_size": False, "log": "物体検出"},
-    "label":    {"parser": "_parse_gemini_label_response",    "needs_image_size": True,  "log": "ラベル検出"},
-    "face":     {"parser": "_parse_gemini_face_response",     "needs_image_size": True,  "log": "顔検出"},
-    "logo":     {"parser": "_parse_gemini_logo_response",     "needs_image_size": True,  "log": "ロゴ検出"},
-    "classify": {"parser": "_parse_gemini_classify_response", "needs_image_size": False, "log": "分類タグ"},
-    "web":      {"parser": "_parse_gemini_web_response",      "needs_image_size": False, "log": "AI識別"},
+    "text":     {"parser": _parse_gemini_text_response,     "needs_image_size": True,  "log": "テキスト検出"},
+    "object":   {"parser": _parse_gemini_object_response,   "needs_image_size": False, "log": "物体検出"},
+    "label":    {"parser": _parse_gemini_label_response,    "needs_image_size": True,  "log": "ラベル検出"},
+    "face":     {"parser": _parse_gemini_face_response,     "needs_image_size": True,  "log": "顔検出"},
+    "logo":     {"parser": _parse_gemini_logo_response,     "needs_image_size": True,  "log": "ロゴ検出"},
+    "classify": {"parser": _parse_gemini_classify_response, "needs_image_size": False, "log": "分類タグ"},
+    "web":      {"parser": _parse_gemini_web_response,      "needs_image_size": False, "log": "AI識別"},
 }
 
 
@@ -1059,7 +1059,7 @@ def _dispatch_mode_handler(mode, gemini_data, image_b64):
         dict: _make_success() 形式のレスポンス辞書。
     """
     handler = _MODE_HANDLERS[mode]
-    parser_func = globals()[handler["parser"]]
+    parser_func = handler["parser"]
     image_size = _get_image_dimensions(image_b64) if handler["needs_image_size"] else None
 
     # label/web は特殊な戻り値を持つ
