@@ -8,6 +8,7 @@ import io
 import json
 import base64
 import logging
+import random
 import time
 from threading import Lock
 
@@ -660,7 +661,8 @@ def _send_gemini_request(api_url, payload, request_id, mode):
                 "Gemini APIレート制限中です。しばらく待ってから再試行してください。",
             )
 
-        fallback_wait = GEMINI_429_BACKOFF_BASE_SECONDS * (2 ** attempt)
+        base_wait = GEMINI_429_BACKOFF_BASE_SECONDS * (2 ** attempt)
+        fallback_wait = base_wait + random.uniform(0, base_wait)
         sleep_seconds = _get_retry_after_seconds(response, fallback_wait)
         logger.info(
             "[%s] Gemini 429を受信したためリトライします (mode=%s, attempt=%d/%d, wait=%.2fs)",
