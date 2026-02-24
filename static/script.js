@@ -497,6 +497,9 @@ function switchCameraDevice(deviceId) {
  */
 function toggleFacingMode() {
     currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+    // インカメはミラーON、外カメはミラーOFF（自然な表示に自動調整）
+    isMirrored = (currentFacingMode === 'user');
+    updateMirrorState();
     updateFlipButton();
     stopCameraStream();
     setupCamera();  // deviceIdなし → currentFacingMode で自動選択
@@ -1119,6 +1122,10 @@ async function captureAndAnalyze() {
             }
         }
         console.error('通信エラー:', err);
+        // 連続スキャン中なら一定時間後に自動復帰を試みる
+        if (isScanning) {
+            scheduleRetry();
+        }
     } finally {
         isAnalyzing = false;
         // シングルショット: 解析完了、ボタンをスタートに戻す
@@ -1250,9 +1257,15 @@ function computeResultFingerprint(result) {
     }
 
     // 共通: data 配列からラベルを抽出してソート結合
+    // 確信度（例: "- 95%"）を除去し、名前のみで比較することで安定した重複検知を実現
     if (!result.data || result.data.length === 0) return null;
     const labels = result.data
-        .map(item => (item.label || '').trim())
+        .map(item => {
+            let label = (item.label || '').trim();
+            // "Apple - 95%" や "りんご（Apple）- 95%" から確信度部分を除去
+            label = label.replace(/\s*[-–]\s*\d+%\s*$/, '');
+            return label.toLowerCase();
+        })
         .filter(l => l.length > 0)
         .sort();
     return labels.length > 0 ? labels.join('|') : null;
