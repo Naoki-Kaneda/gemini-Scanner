@@ -88,6 +88,17 @@ const MODE_BOX_CONFIG = {
     web:      { color: null,      bg: null,                        showLabel: false },
 };
 
+/** モード別のヒント入力欄 placeholder テキスト */
+const MODE_HINT_PLACEHOLDER = {
+    text:     'ヒント例: 賞味期限を探して、英語を翻訳して',
+    object:   'ヒント例: 食品だけ検出して、危険物を探して',
+    label:    'ヒント例: バーコードを読み取って、商品名を特定して',
+    face:     'ヒント例: 年齢も推定して、表情を詳しく分析して',
+    logo:     'ヒント例: ブランド名を特定して',
+    classify: 'ヒント例: 料理のジャンルを判定して',
+    web:      'ヒント例: この建物は何？、この絵の作者は？',
+};
+
 /** タイムアウト付き fetch のシグナルを生成する。
  *  AbortSignal.timeout() 非対応ブラウザ（Safari 15以前等）では
  *  AbortController + setTimeout でフォールバックする。 */
@@ -1617,6 +1628,11 @@ function setMode(mode) {
     });
     clearResults();
     clearOverlay();
+    // ヒント入力欄の placeholder をモードに合わせて切り替え
+    const hintEl = document.getElementById('context-hint');
+    if (hintEl) {
+        hintEl.placeholder = MODE_HINT_PLACEHOLDER[mode] || MODE_HINT_PLACEHOLDER.text;
+    }
 }
 
 
