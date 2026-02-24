@@ -374,6 +374,7 @@ video {
     background: var(--md-surface-container-highest);
     padding: 4px 8px;
     border-radius: var(--md-shape-corner-full);
+    overflow-x: auto;
 }
 
 /* ─── MD3 Tool Button（アイコンボタン風） ────── */
@@ -387,7 +388,6 @@ video {
     font-size: 0.8rem;
     font-family: inherit;
     white-space: nowrap;
-    flex-shrink: 0;
     transition: all var(--md-motion-standard);
 }
 
@@ -407,6 +407,7 @@ video {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    flex-shrink: 0;
 }
 
 .mode-switch {
@@ -426,6 +427,7 @@ video {
     font-size: 0.75rem;
     font-family: inherit;
     font-weight: 600;
+    white-space: nowrap;
     transition: all var(--md-motion-standard);
 }
 
