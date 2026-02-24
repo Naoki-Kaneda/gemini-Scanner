@@ -386,7 +386,15 @@ video {
     cursor: pointer;
     font-size: 0.8rem;
     font-family: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
     transition: all var(--md-motion-standard);
+}
+
+/* カメラ切替ボタン: テキスト長の変動（外カメ⇔インカメ）でレイアウトが崩れないよう幅を固定 */
+#btn-flip-cam {
+    min-width: 5.5em;
+    text-align: center;
 }
 
 .tool-btn:hover {
