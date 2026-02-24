@@ -3,6 +3,8 @@ Gemini Vision Scanner - メインアプリケーション。
 カメラ映像からテキスト抽出・物体検出を行うWebアプリケーション。
 """
 
+from __future__ import annotations
+
 import os
 import base64
 import hashlib
@@ -11,6 +13,7 @@ import secrets
 import socket
 
 from flask import Flask, render_template, request, jsonify, g
+from flask.wrappers import Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 from gemini_api import detect_content, get_proxy_status, set_proxy_enabled, VALID_MODES, API_KEY
@@ -65,7 +68,7 @@ ERR_INVALID_TYPE = "INVALID_TYPE"
 ERR_METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
 
 # 起動時セキュリティチェック
-def _check_admin_secret(secret):
+def _check_admin_secret(secret: str) -> list[str]:
     """ADMIN_SECRETの強度を検証し、警告メッセージのリストを返す。"""
     warnings = []
     if not secret:
@@ -118,7 +121,7 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 _static_hash_cache = {}
 
 
-def _static_file_hash(filename):
+def _static_file_hash(filename: str) -> str:
     """静的ファイルのMD5ハッシュ先頭8文字を返す（キャッシュバスティング用）。
 
     filename単位でキャッシュし、mtimeが変わったら上書きする。
@@ -243,7 +246,7 @@ def handle_method_not_allowed(_e):
 
 
 # ─── レートキー生成 ──────────────────────────────
-def _build_rate_key():
+def _build_rate_key() -> tuple[str, str]:
     """リクエストのIP（+UserAgent）からレート制限キーを生成する。"""
     client_ip = request.remote_addr or "unknown"
     if RATE_LIMIT_KEY_MODE == "ip_ua":
@@ -253,7 +256,7 @@ def _build_rate_key():
 
 
 # ─── レスポンスヘルパー ────────────────────────────
-def _is_admin_authenticated():
+def _is_admin_authenticated() -> bool:
     """リクエストのX-Admin-Secretヘッダーで管理者認証を検証する。
 
     Returns:
@@ -265,7 +268,9 @@ def _is_admin_authenticated():
     return secrets.compare_digest(auth_header, ADMIN_SECRET)
 
 
-def _error_response(error_code, message, status_code=400, headers=None):
+def _error_response(
+    error_code: str, message: str, status_code: int = 400, headers: dict[str, str] | None = None,
+) -> tuple[Response, int]:
     """標準化されたエラーレスポンスを生成する。headersで追加HTTPヘッダーを指定可能。"""
     response = jsonify({
         "ok": False,
@@ -279,7 +284,7 @@ def _error_response(error_code, message, status_code=400, headers=None):
     return response, status_code
 
 
-def _log(level, event, **kwargs):
+def _log(level: str, event: str, **kwargs: object) -> None:
     """構造化ログ出力（request-id自動付与）。"""
     req_id = getattr(g, "request_id", "-")
     parts = [f"event={event}", f"request_id={req_id}"]
@@ -288,7 +293,7 @@ def _log(level, event, **kwargs):
 
 
 # ─── 画像フォーマット検証 ──────────────────────────
-def _validate_image_format(decoded_bytes):
+def _validate_image_format(decoded_bytes: bytes) -> bool:
     """
     デコード済みバイト列のマジックバイトを検査し、許可されたフォーマットか判定する。
 
@@ -417,7 +422,7 @@ def update_proxy_config():
     return jsonify({"ok": True, "status": new_status})
 
 
-def _validate_analyze_request():
+def _validate_analyze_request() -> tuple[str | None, str | None, str | None, tuple[Response, int] | None]:
     """
     /api/analyze のリクエストを検証し、画像データ・モード・ヒントを返す。
 
@@ -440,7 +445,7 @@ def _validate_analyze_request():
         return None, None, None, _error_response(ERR_MISSING_IMAGE, "画像データがありません")
 
     mode = data.get("mode", "text")
-    if mode not in VALID_MODES:
+    if not isinstance(mode, str) or mode not in VALID_MODES:
         return None, None, None, _error_response(ERR_INVALID_MODE, f"不正なモード: '{mode}'。許可値: {list(VALID_MODES)}")
 
     # キーワードヒント（任意）: 制御文字を除去し200文字に制限
@@ -550,15 +555,19 @@ def analyze_endpoint():
     except Exception as e:
         release_request(rate_key, request_id)
         _log("error", "server_error", ip=client_ip, mode=mode, error=str(e))
+        logger.exception("予期しない例外が発生しました (request_id=%s)", getattr(g, "request_id", "-"))
         return _error_response(ERR_SERVER_ERROR, "内部サーバーエラーが発生しました", 500)
 
 
 if __name__ == "__main__":
+    # 本番環境に近い状態（SSL設定あり等）でのデバッグモード誤有効化を防止
+    is_debug = FLASK_DEBUG
     ssl_cert = os.environ.get("SSL_CERT_PATH")
     ssl_key = os.environ.get("SSL_KEY_PATH")
+
     if ssl_cert and ssl_key:
         logger.info("HTTPS モードで起動 (証明書: %s)", ssl_cert)
-        app.run(debug=FLASK_DEBUG, host="0.0.0.0", port=APP_PORT,
+        app.run(debug=is_debug, host="0.0.0.0", port=APP_PORT,
                 ssl_context=(ssl_cert, ssl_key))
     else:
-        app.run(debug=FLASK_DEBUG, port=APP_PORT)
+        app.run(debug=is_debug, port=APP_PORT)
