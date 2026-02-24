@@ -507,24 +507,26 @@ def analyze_endpoint():
 
     # ─── レート制限チェック＆予約（原子的） ──
     client_ip, rate_key = _build_rate_key()
-    limited, limit_message, request_id = try_consume_request(rate_key)
+    limited, limit_message, payload = try_consume_request(rate_key)
     if limited:
         is_daily = "日" in limit_message
         _log("info", "rate_limited", ip=client_ip, reason=limit_message,
              limit_type="daily" if is_daily else "minute")
-        # 日次制限は長めの待機、分制限は短めの待機をクライアントに通知
-        retry_after = "60" if is_daily else "10"
+        # 日次制限は60秒（翌日まで復旧しない）、分制限は計算された待機秒数を通知
+        retry_after = str(payload) if (payload and not is_daily) else "60"
         response = jsonify({
             "ok": False,
             "data": [],
             "error_code": ERR_RATE_LIMITED,
             "message": limit_message,
             "limit_type": "daily" if is_daily else "minute",
+            "retry_after": int(retry_after),
         })
         response.headers["Retry-After"] = retry_after
         return response, 429
 
     # ─── Gemini API呼び出し ─────────────
+    request_id = payload  # 成功時は request_id が入っている
     try:
         result = detect_content(image_data, mode, request_id=g.request_id, context_hint=hint)
 

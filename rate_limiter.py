@@ -37,7 +37,7 @@ def _today_key():
 class RateLimiterBackend(Protocol):
     """レート制限バックエンドのインターフェース仕様（構造的部分型）。"""
 
-    def try_consume(self, client_ip: str) -> Tuple[bool, str, Optional[str]]: ...
+    def try_consume(self, client_ip: str) -> Tuple[bool, str, Optional[str | int]]: ...
     def release(self, client_ip: str, request_id: str) -> None: ...
     def get_daily_count(self, client_ip: str) -> int: ...
 
@@ -55,6 +55,10 @@ class RedisRateLimiter:
     """Redis原子操作によるレート制限（マルチプロセス安全）。"""
 
     # Lua: チェック＆予約を原子的に実行
+    # 戻り値: [status, payload]
+    # status 0: 成功, payload = request_id
+    # status 1: 分制限超過, payload = wait_seconds ( oldest_ts + 60 - now )
+    # status 2: 日制限超過, payload = 'daily'
     _LUA_CONSUME = """
     local minute_key = KEYS[1]
     local daily_key = KEYS[2]
@@ -68,12 +72,17 @@ class RedisRateLimiter:
 
     local daily_count = tonumber(redis.call('GET', daily_key) or '0')
     if daily_count >= daily_limit then
-        return {1, 'daily'}
+        return {2, 'daily'}
     end
 
     local minute_count = redis.call('ZCARD', minute_key)
     if minute_count >= per_minute then
-        return {1, 'minute'}
+        local oldest = redis.call('ZRANGE', minute_key, 0, 0, 'WITHSCORES')
+        local wait = 10
+        if #oldest >= 2 then
+            wait = math.max(1, math.ceil(tonumber(oldest[2]) + 60 - now))
+        end
+        return {1, wait}
     end
 
     redis.call('ZADD', minute_key, now, request_id)
@@ -110,7 +119,7 @@ class RedisRateLimiter:
         制限チェック＆予約を原子的に実行する。
 
         Returns:
-            tuple: (制限中か, エラーメッセージ, request_id|None)
+            tuple: (制限中か, エラーメッセージ, request_id|wait_seconds|None)
         """
         now = time.time()
         today = _today_key()
@@ -129,14 +138,17 @@ class RedisRateLimiter:
             str(seconds_until_midnight),
         )
 
-        if result[0] == 1:
-            reason = result[1] if isinstance(result[1], str) else result[1].decode()
-            if reason == "daily":
-                return True, _MSG_DAILY_EXCEEDED, None
-            return True, _MSG_MINUTE_EXCEEDED, None
+        status = result[0]
+        payload = result[1] if isinstance(result[1], str) else result[1]
+        if isinstance(payload, bytes):
+            payload = payload.decode()
 
-        returned_id = result[1] if isinstance(result[1], str) else result[1].decode()
-        return False, "", returned_id
+        if status == 2:  # daily
+            return True, _MSG_DAILY_EXCEEDED, None
+        if status == 1:  # minute
+            return True, _MSG_MINUTE_EXCEEDED, payload
+
+        return False, "", payload
 
     def release(self, client_ip, request_id):
         """失敗時に指定IDの予約のみを取り消す。"""
@@ -173,7 +185,7 @@ class InMemoryRateLimiter:
         制限チェック＆予約を原子的に実行する。
 
         Returns:
-            tuple: (制限中か, エラーメッセージ, request_id|None)
+            tuple: (制限中か, エラーメッセージ, request_id|wait_seconds|None)
         """
         now = time.time()
         today = _today_key()
@@ -189,7 +201,10 @@ class InMemoryRateLimiter:
             entries = list(self._rate_store.get(client_ip, []))
             recent = [e for e in entries if now - e[0] < 60]
             if len(recent) >= RATE_LIMIT_PER_MINUTE:
-                return True, _MSG_MINUTE_EXCEEDED, None
+                # 最も古いエントリーが消えるまでの秒数を計算（切り上げ）
+                oldest_ts = recent[0][0]
+                wait_seconds = max(1, int(oldest_ts + 60 - now) + 1)
+                return True, _MSG_MINUTE_EXCEEDED, wait_seconds
 
             request_id = uuid.uuid4().hex[:12]
             self._rate_store[client_ip] = recent + [(now, request_id)]

@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     TARGET_BOX_TOP    = _readCssPercent('--target-box-top',    0.01);
     TARGET_BOX_HEIGHT = _readCssPercent('--target-box-height', 0.97);
 });
-const STABILITY_THRESHOLD = 30;      // 安定判定フレーム数（約1秒@30fps）
+const STABILITY_THRESHOLD = 20;      // 安定判定フレーム数（約0.6秒@30fps） - 応答性向上のため短縮
 const MOTION_THRESHOLD = 30;         // フレーム間差分の閾値（カメラノイズ耐性を確保）
 const MOTION_CANVAS_WIDTH = 64;      // モーション検出用キャンバス幅
 const MOTION_CANVAS_HEIGHT = 48;     // モーション検出用キャンバス高さ
@@ -66,8 +66,8 @@ function getNetworkQualityMultiplier() {
 const MIN_RESULT_LENGTH = 5;         // 結果フィルター: 最小文字数
 const LABEL_MAX_LENGTH = 25;         // バウンディングボックスのラベル最大文字数
 const RETRY_DELAY_MS = 10000;        // エラー後の再試行待機時間（ミリ秒）
-const CAPTURE_RESET_DELAY_MS = 30000;      // 撮影完了後の次スキャンまでの待機（ミリ秒）
-const LABEL_CAPTURE_RESET_DELAY_MS = 30000; // ラベルモード: 次のスキャンまでの待機（ミリ秒）
+const CAPTURE_RESET_DELAY_MS = 3000;       // 撮影完了後の次スキャンまでの待機（ミリ秒） - 短縮
+const LABEL_CAPTURE_RESET_DELAY_MS = 3000; // ラベルモード: 次のスキャンまでの待機（ミリ秒） - 短縮
 // true にするとクライアント側でも日次上限を強制。既定は false（サーバー側429に委譲）
 const ENFORCE_CLIENT_DAILY_LIMIT = false;
 const FETCH_TIMEOUT_MS = 60000;      // fetch タイムアウト（Gemini API 30秒×リトライ＋余裕）
@@ -152,6 +152,7 @@ let retryTimerId = null;      // 再試行用タイマーID
 let cooldownTimerId = null;   // レート制限クールダウンタイマーID
 let cooldownRemaining = 0;    // クールダウン残り秒数（0 = クールダウン中でない）
 let isAnalyzing = false;      // API呼び出し中フラグ（並行呼び出し防止）
+let shouldRestartAfterCooldown = false; // クールダウン終了後に自動的にスキャンを開始するか
 let lastSentImageHash = null; // 前回送信した画像のハッシュ値（重複送信防止用）
 let lastResultFingerprint = null;    // 直前のAPI結果の指紋（重複検出用）
 let duplicateCount = 0;              // 同じ結果の連続回数
@@ -640,8 +641,9 @@ function toggleScanning() {
     if (isAnalyzing) return; // 解析中（API応答待ち）はトグル無効
     // クールダウン中: ボタンを押してもスキャン開始せず、残り秒数をフィードバック
     if (cooldownRemaining > 0) {
+        shouldRestartAfterCooldown = true;
         if (statusText) {
-            statusText.textContent = `⏳ クールダウン中です。あと${cooldownRemaining}秒お待ちください`;
+            statusText.textContent = `⏳ 解除まであと${cooldownRemaining}秒 — 解除後に自動スキャン開始します`;
         }
         return;
     }
@@ -1028,7 +1030,8 @@ async function captureAndAnalyze() {
                 return;
             }
             // RPM（分制限）: クールダウン後に自動復帰
-            const retryAfter = parseInt(response.headers.get('Retry-After') || '10', 10);
+            // サーバーから渡された具体的な待機秒数を使用（デフォルト10秒）
+            const retryAfter = parseInt(result.retry_after || response.headers.get('Retry-After') || '10', 10);
             if (statusText) statusText.textContent = `⚠ ${result.message || 'リクエスト制限中'}`;
             startCooldownCountdown(retryAfter);
             return;
@@ -1201,6 +1204,12 @@ function stopCooldownCountdown() {
     if (stabilityBarFill) {
         stabilityBarFill.classList.remove('cooldown');
         stabilityBarFill.style.width = '0%';
+    }
+
+    // クールダウン中にボタンが押されていた場合は、自動的にスキャンを開始する
+    if (shouldRestartAfterCooldown) {
+        shouldRestartAfterCooldown = false;
+        startScanning();
     }
 }
 
