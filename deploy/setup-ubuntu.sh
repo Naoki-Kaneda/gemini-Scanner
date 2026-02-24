@@ -8,11 +8,11 @@
 #      git clone https://github.com/Naoki-Kaneda/gemini-Scanner.git
 #   2. sudo bash gemini-Scanner/deploy/setup-ubuntu.sh
 #   3. プロンプトに従って GEMINI_API_KEY を入力
-#   4. ブラウザで https://<サーバーIP>:8443 にアクセス
+#   4. ブラウザで https://<サーバーIP>:8444 にアクセス
 #
 # 【構成】
-#   nginx (HTTPS:8443) → gunicorn (localhost:8001) → Flask app
-#   ※ ポート443/8000はVision AI Scannerが使用するため、8443/8001で共存
+#   nginx (HTTPS:8444) → gunicorn (localhost:8001) → Flask app
+#   ※ ポート443/8000はVision AI Scannerが使用するため、8444/8001で共存
 #   自己署名SSL証明書でHTTPS化（カメラ機能に必須）
 #
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -196,7 +196,7 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo -e "${GREEN}  セットアップ完了！${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "  アクセスURL: https://${SERVER_IP}:8443"
+echo "  アクセスURL: https://${SERVER_IP}:8444"
 echo ""
 echo -e "  ${YELLOW}※ 自己署名証明書のため、ブラウザで警告が出ます。${NC}"
 echo -e "  ${YELLOW}  「詳細設定」→「安全でないサイトに進む」で利用できます。${NC}"
@@ -210,5 +210,5 @@ echo "  設定変更:   sudo nano ${APP_DIR}/.env"
 echo ""
 echo "  ─── 同一サーバーで Vision AI Scanner と共存 ───"
 echo "  Vision AI Scanner: https://${SERVER_IP}     (ポート443)"
-echo "  Gemini Scanner:    https://${SERVER_IP}:8443 (ポート8443)"
+echo "  Gemini Scanner:    https://${SERVER_IP}:8444 (ポート8444)"
 echo ""

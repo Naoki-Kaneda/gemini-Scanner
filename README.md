@@ -50,7 +50,7 @@ chmod +x start.sh
 ### 構成図
 
 ```
-ブラウザ → nginx (HTTPS:8443) → gunicorn (localhost:8001) → Flask app
+ブラウザ → nginx (HTTPS:8444) → gunicorn (localhost:8001) → Flask app
 ```
 
 ### インストール手順
@@ -74,7 +74,7 @@ sudo bash deploy/setup-ubuntu.sh
 6. 自己署名 SSL 証明書の生成（有効期限10年）
 7. nginx / systemd の設定と自動起動
 
-完了後、`https://<サーバーIP>:8443` でアクセスできます。
+完了後、`https://<サーバーIP>:8444` でアクセスできます。
 
 ### Vision AI Scanner との共存
 
@@ -83,7 +83,7 @@ sudo bash deploy/setup-ubuntu.sh
 | アプリ | アクセスURL | nginx ポート | gunicorn ポート |
 |--------|-----------|-------------|----------------|
 | Vision AI Scanner | `https://<IP>` | 443 | 8000 |
-| Gemini Vision Scanner | `https://<IP>:8443` | 8443 | 8001 |
+| Gemini Vision Scanner | `https://<IP>:8444` | 8444 | 8001 |
 
 ### よく使うコマンド
 

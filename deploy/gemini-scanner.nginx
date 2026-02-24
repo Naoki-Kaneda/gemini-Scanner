@@ -1,10 +1,10 @@
 # Gemini Vision Scanner - nginx 設定
-# HTTPS (自己署名SSL, ポート8443) → gunicorn リバースプロキシ
-# ※ ポート443はVision AI Scannerが使用するため8443で共存
+# HTTPS (自己署名SSL, ポート8444) → gunicorn リバースプロキシ
+# ※ ポート443はVision AI Scannerが使用するため8444で共存
 
-# HTTPS サーバー（8443ポート）
+# HTTPS サーバー（8444ポート）
 server {
-    listen 8443 ssl;
+    listen 8444 ssl;
     server_name _;
 
     # SSL証明書（セットアップスクリプトが自動生成）
