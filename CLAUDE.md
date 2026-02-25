@@ -57,6 +57,23 @@ static/style.css     → レスポンシブ/グラスモーフィズム
 [6] add_security_headers() → CSP・CORS等のヘッダー付与
 ```
 
+### API応答統一形式
+
+全エンドポイントで以下のフィールドを保証（成功・エラー共通）:
+
+```json
+{
+    "ok": true/false,
+    "data": [],
+    "error_code": "ERROR_CODE" | null,
+    "message": "メッセージ" | null,
+    "request_id": "16桁hex",
+    "retry_after": 30 | null
+}
+```
+
+`request_id`はリクエスト追跡用（`g.request_id`から注入）。`retry_after`は429時のみ秒数が入る。
+
 ### Reserve-Release パターン（app.py ↔ rate_limiter.py）
 
 レート制限は「予約方式」を採用。API呼び出し**前に**`try_consume_request()`でカウントを消費し`request_id`を発行。API失敗時のみ`release_request(rate_key, request_id)`で**そのIDのカウントだけ**をロールバックする。並行リクエストの他カウントには影響しない。
@@ -93,9 +110,34 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
 - **2段階**: 分単位（60秒ローリングウィンドウ）+ 日次
 - **バックエンド自動切替**: `REDIS_URL`設定時はRedis（Lua原子操作）、未設定はインメモリ（`threading.Lock`）
 - **遅延初期化**: `_get_backend()`で最初のリクエスト時にバックエンドを決定
-- **キー方式**: `ip_ua`（IP+SHA256(UserAgent[:64])[:8]）または`ip`（IPのみ）
+- **キー方式**: デフォルト`ip`（IPのみ）。`ip_ua`（IP+SHA256(UserAgent[:64])[:8]）は`RATE_LIMIT_KEY_MODE=ip_ua`で有効化
+- **キー方式選択指針**: `ip`はUA偽装による回避を防止できるためデフォルト推奨。NAT/共有IP環境で個別制御が必要な場合のみ`ip_ua`を検討
 
-### フロントエンド安定化パイプライン（script.js）
+### フロントエンド状態機械（script.js）
+
+スキャンの状態管理は `ScanState` 列挙型と `transitionTo()` で一元管理:
+
+```
+状態:
+  IDLE              → 停止中（初期状態）
+  SCANNING          → カメラスキャン中（安定化検出ループ動作中）
+  ANALYZING         → API呼び出し中（応答待ち）
+  PAUSED_ERROR      → エラーにより一時停止（自動復帰予定）
+  PAUSED_DUPLICATE  → 重複検出により一時停止（カメラ移動で解除）
+  COOLDOWN          → レート制限クールダウン中
+
+遷移テーブル:
+  IDLE             → SCANNING
+  SCANNING         → IDLE, ANALYZING, PAUSED_DUPLICATE
+  ANALYZING        → IDLE, SCANNING, PAUSED_ERROR, PAUSED_DUPLICATE, COOLDOWN
+  PAUSED_ERROR     → IDLE, SCANNING
+  PAUSED_DUPLICATE → IDLE, SCANNING
+  COOLDOWN         → IDLE, SCANNING
+```
+
+`stopScanning()` は緊急停止として全状態から IDLE に強制リセット（遷移ガードなし）。
+
+### フロントエンド安定化パイプライン
 
 ```
 scanLoop() → requestAnimationFrame
@@ -137,7 +179,7 @@ scanLoop() → requestAnimationFrame
 | `REDIS_URL` | 空 | Redis接続URL（マルチプロセス時必須） |
 | `RATE_LIMIT_PER_MINUTE` | 20 | 分制限 |
 | `RATE_LIMIT_DAILY` | 1000 | 日次制限 |
-| `RATE_LIMIT_KEY_MODE` | ip_ua | レート制限キー方式（`ip_ua` or `ip`） |
+| `RATE_LIMIT_KEY_MODE` | ip | レート制限キー方式（`ip` or `ip_ua`） |
 | `ALLOWED_ORIGINS` | 空 | CORS許可Origin（カンマ区切り） |
 | `ADMIN_SECRET` | 空 | 管理API認証用シークレット |
 | `TRUST_PROXY` | false | X-Forwarded-For信頼（nginx配下で必須） |

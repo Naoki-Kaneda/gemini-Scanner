@@ -410,14 +410,8 @@ class TestRateLimitAtomicity:
 
     @staticmethod
     def _get_rate_key():
-        """テストクライアントが使うレート制限キーを再現する（ip_uaモード対応）。"""
-        import hashlib
-        # Werkzeugテストクライアントのデフォルト User-Agent の先頭64文字
-        from importlib.metadata import version as pkg_version
-        ua = "werkzeug/" + pkg_version("werkzeug")
-        ua_fragment = ua[:64]
-        ua_hash = hashlib.sha256(ua_fragment.encode()).hexdigest()[:8]
-        return f"127.0.0.1:{ua_hash}"
+        """テストクライアントが使うレート制限キーを返す（デフォルトipモード）。"""
+        return "127.0.0.1"
 
     @patch("app.detect_content")
     def test_API失敗時にレート制限カウントが戻る(self, mock_detect, client):
@@ -548,6 +542,69 @@ class TestErrorHandlers:
         data = response.get_json()
         assert data["ok"] is False
         assert data["error_code"] == "REQUEST_TOO_LARGE"
+
+
+class TestErrorResponseFormat:
+    """全エラーレスポンスが統一形式（request_id, retry_after）を含むことの検証。"""
+
+    def test_400エラーにrequest_idとretry_afterが含まれる(self, client):
+        """バリデーションエラー時に統一フィールドが返ること。"""
+        response = client.post("/api/analyze", json={"mode": "text"})
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "request_id" in data
+        assert isinstance(data["request_id"], str)
+        assert len(data["request_id"]) == 16
+        assert data["retry_after"] is None
+
+    @patch("app.detect_content")
+    def test_成功レスポンスにrequest_idが含まれる(self, mock_detect, client):
+        """成功レスポンスにも request_id と retry_after が含まれること。"""
+        mock_detect.return_value = {
+            "ok": True, "data": [], "image_size": None,
+            "error_code": None, "message": None,
+        }
+        response = client.post("/api/analyze", json={
+            "image": create_valid_image_base64(),
+            "mode": "text",
+        })
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "request_id" in data
+        assert len(data["request_id"]) == 16
+        assert data["retry_after"] is None
+
+    @patch("app.detect_content")
+    def test_502エラーにrequest_idとretry_afterが含まれる(self, mock_detect, client):
+        """Gemini APIエラー時にも統一フィールドが返ること。"""
+        mock_detect.return_value = {
+            "ok": False, "data": [], "image_size": None,
+            "error_code": "API_500", "message": "APIエラー",
+        }
+        response = client.post("/api/analyze", json={
+            "image": create_valid_image_base64(),
+            "mode": "text",
+        })
+        assert response.status_code == 502
+        data = response.get_json()
+        assert "request_id" in data
+        assert data["retry_after"] is None
+
+    @patch("app.detect_content")
+    def test_429エラーにretry_afterが数値で含まれる(self, mock_detect, client):
+        """Geminiレート制限時に retry_after が数値として返ること。"""
+        mock_detect.return_value = {
+            "ok": False, "data": [], "image_size": None,
+            "error_code": "GEMINI_RATE_LIMITED", "message": "レート制限中",
+        }
+        response = client.post("/api/analyze", json={
+            "image": create_valid_image_base64(),
+            "mode": "text",
+        })
+        assert response.status_code == 429
+        data = response.get_json()
+        assert "request_id" in data
+        assert data["retry_after"] == 30
 
 
 class TestProxyGetAuth:

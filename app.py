@@ -42,13 +42,13 @@ MAX_REQUEST_BODY = 10 * 1024 * 1024       # 10MB（Base64 + JSONオーバーヘ�
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")  # 管理API認証用シークレット
 # レート制限キー方式: "ip_ua"=IP+UserAgent複合キー, "ip"=IPのみ
 _VALID_KEY_MODES = {"ip_ua", "ip"}
-_raw_key_mode = os.getenv("RATE_LIMIT_KEY_MODE", "ip_ua").lower()
+_raw_key_mode = os.getenv("RATE_LIMIT_KEY_MODE", "ip").lower()
 if _raw_key_mode not in _VALID_KEY_MODES:
     logging.getLogger(__name__).warning(
-        "RATE_LIMIT_KEY_MODE=%r は無効です（有効値: %s）。デフォルト ip_ua を使用します。",
+        "RATE_LIMIT_KEY_MODE=%r は無効です（有効値: %s）。デフォルト ip を使用します。",
         _raw_key_mode, ", ".join(sorted(_VALID_KEY_MODES)),
     )
-    _raw_key_mode = "ip_ua"
+    _raw_key_mode = "ip"
 RATE_LIMIT_KEY_MODE = _raw_key_mode
 
 # ─── エラーコード定数（タイポ防止） ────────────────────
@@ -269,14 +269,22 @@ def _is_admin_authenticated() -> bool:
 
 
 def _error_response(
-    error_code: str, message: str, status_code: int = 400, headers: dict[str, str] | None = None,
+    error_code: str, message: str, status_code: int = 400,
+    headers: dict[str, str] | None = None,
+    retry_after: int | None = None,
 ) -> tuple[Response, int]:
-    """標準化されたエラーレスポンスを生成する。headersで追加HTTPヘッダーを指定可能。"""
+    """標準化されたエラーレスポンスを生成する。
+
+    全エラーレスポンスで統一形式を保証:
+      ok, data, error_code, message, request_id, retry_after
+    """
     response = jsonify({
         "ok": False,
         "data": [],
         "error_code": error_code,
         "message": message,
+        "request_id": getattr(g, "request_id", ""),
+        "retry_after": retry_after,
     })
     if headers:
         for key, value in headers.items():
@@ -528,13 +536,15 @@ def analyze_endpoint():
              limit_type="daily" if is_daily else "minute")
         # 日次制限は翌日まで復旧しないため長めに設定、分制限は計算された待機秒数を通知
         retry_after = str(payload) if not is_daily else "60"
+        retry_after_int = int(retry_after)
         response = jsonify({
             "ok": False,
             "data": [],
             "error_code": ERR_RATE_LIMITED,
             "message": limit_message,
+            "request_id": getattr(g, "request_id", ""),
+            "retry_after": retry_after_int,
             "limit_type": "daily" if is_daily else "minute",
-            "retry_after": int(retry_after),
         })
         response.headers["Retry-After"] = retry_after
         return response, 429
@@ -544,16 +554,22 @@ def analyze_endpoint():
     try:
         result = detect_content(image_data, mode, request_id=g.request_id, context_hint=hint)
 
+        # 統一形式: 全レスポンスに request_id を注入
+        result["request_id"] = getattr(g, "request_id", "")
+
         if result["ok"]:
+            result["retry_after"] = None
             _log("info", "api_success", ip=client_ip, mode=mode, items=len(result["data"]))
             return jsonify(result), 200
 
         release_request(rate_key, request_id)
         _log("warning", "api_failure", ip=client_ip, mode=mode, error_code=result["error_code"])
         if result.get("error_code") == "GEMINI_RATE_LIMITED":
+            result["retry_after"] = 30
             response = jsonify(result)
             response.headers["Retry-After"] = "30"
             return response, 429
+        result["retry_after"] = None
         return jsonify(result), 502
 
     except ValueError as e:
