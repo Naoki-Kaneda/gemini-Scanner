@@ -125,17 +125,58 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
   PAUSED_ERROR      → エラーにより一時停止（自動復帰予定）
   PAUSED_DUPLICATE  → 重複検出により一時停止（カメラ移動で解除）
   COOLDOWN          → レート制限クールダウン中
-
-遷移テーブル:
-  IDLE             → SCANNING
-  SCANNING         → IDLE, ANALYZING, PAUSED_DUPLICATE
-  ANALYZING        → IDLE, SCANNING, PAUSED_ERROR, PAUSED_DUPLICATE, COOLDOWN
-  PAUSED_ERROR     → IDLE, SCANNING
-  PAUSED_DUPLICATE → IDLE, SCANNING
-  COOLDOWN         → IDLE, SCANNING
 ```
 
-`stopScanning()` は緊急停止として全状態から IDLE に強制リセット（遷移ガードなし）。
+状態遷移図（`stopScanning()` による IDLE への強制リセットは全状態から可能・図中省略）:
+
+```
+                    startScanning()
+              ┌──────────────────────┐
+              │                      │
+              ▼                      │
+         ┌─────────┐  captureAndAnalyze()  ┌────────────┐
+  ──────>│  IDLE   │─────────────────────>│  SCANNING  │
+         └─────────┘                      └────────────┘
+              ▲                             │       │  ▲
+              │                  安定検出完了│       │  │
+              │                             ▼       │  │
+              │                      ┌────────────┐ │  │
+              │  API成功/失敗(finally)│ ANALYZING  │ │  │
+              │◄─────────────────────┤            │ │  │
+              │                      └────────────┘ │  │
+              │                       │  │  │       │  │
+              │             通信エラー │  │  │ 重複N回│  │ カメラ移動
+              │                       ▼  │  │       ▼  │
+              │  ┌──────────────┐        │  │  ┌──────────────────┐
+              │  │ PAUSED_ERROR │        │  │  │ PAUSED_DUPLICATE │
+              │  └──────────────┘        │  │  └──────────────────┘
+              │        │  RETRY_DELAY後  │  │
+              │        └────────────────>│  │
+              │           startScanning()│  │
+              │                          │  │
+              │              429分制限    │  │
+              │                          ▼  │
+              │                   ┌──────────┐
+              │  カウントダウン終了│ COOLDOWN │
+              │◄──────────────────┤          │
+              │                   └──────────┘
+```
+
+遷移のトリガー詳細:
+
+| 遷移 | トリガー | 関数 |
+|------|----------|------|
+| IDLE → SCANNING | ボタン押下 / cooldown終了 | `startScanning()` |
+| SCANNING → ANALYZING | 安定検出完了 | `captureAndAnalyze()` |
+| SCANNING → PAUSED_DUPLICATE | 重複N回連続（ループは継続） | `checkStabilityAndCapture()` |
+| ANALYZING → IDLE | API成功/失敗（finallyブロック） | `captureAndAnalyze()` |
+| ANALYZING → PAUSED_ERROR | 通信エラー（catch） | `scheduleRetry()` |
+| ANALYZING → PAUSED_DUPLICATE | API成功+重複N回 | `captureAndAnalyze()` finally |
+| ANALYZING → COOLDOWN | 429分制限 | `startCooldownCountdown()` |
+| PAUSED_ERROR → SCANNING | RETRY_DELAY_MS(10秒)後 | `scheduleRetry()` callback |
+| PAUSED_DUPLICATE → SCANNING | カメラ移動検出 / モード変更 | `checkStabilityAndCapture()` |
+| COOLDOWN → IDLE | カウントダウン終了 | `stopCooldownCountdown()` |
+| 全状態 → IDLE | 手動停止 / タブ離脱 | `stopScanning()`（強制リセット） |
 
 ### フロントエンド安定化パイプライン
 

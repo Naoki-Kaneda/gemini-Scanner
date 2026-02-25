@@ -348,8 +348,57 @@ event=server_error request_id=h8g7f6e5d4c3b2a1 ip=192.168.1.1 mode=text error=..
 | `event=rate_limited` 発生率 | 5分間で10件超 | Warning |
 | `event=api_failure` + `error_code=GEMINI_RATE_LIMITED` | 5分間で5件超 | Warning（APIクォータ逼迫） |
 | `event=api_failure` + `error_code=API_500` | 1件でも | Critical（Gemini障害） |
+| `event=api_failure` + `error_code=TIMEOUT` | 5分間で3件超 | Warning（ネットワーク不安定） |
+| `event=api_failure` + `error_code=SAFETY_BLOCKED` | 5分間で5件超 | Info（不適切画像の集中送信） |
+| `event=api_failure` + `error_code=PARSE_ERROR` | 1件でも | Warning（APIレスポンス形式変更の可能性） |
 | `event=server_error` | 1件でも | Critical（アプリバグ） |
 | `/readyz` が503 | 1分間継続 | Critical（デプロイ不備） |
+
+### error_code 別件数の集計
+
+異常の早期検知には error_code 別の件数推移が有効。以下のコマンドで定期集計する。
+
+```bash
+# error_code 別の件数（直近1時間、全イベント対象）
+sudo journalctl -u gemini-scanner --since "1 hour ago" \
+  | grep -oP 'error_code=\S+' | sort | uniq -c | sort -rn
+
+# 出力例:
+#   42 error_code=None           ← 正常（成功レスポンス）
+#    5 error_code=GEMINI_RATE_LIMITED  ← APIクォータ逼迫
+#    3 error_code=TIMEOUT        ← ネットワーク遅延
+#    1 error_code=PARSE_ERROR    ← レスポンス形式異常（要調査）
+
+# モード別 × error_code のクロス集計（異常が特定モードに偏っていないか確認）
+sudo journalctl -u gemini-scanner --since "1 hour ago" \
+  | grep "event=api_failure" \
+  | grep -oP '(mode|error_code)=\S+' \
+  | paste - - | sort | uniq -c | sort -rn
+
+# 出力例:
+#    3 mode=text error_code=TIMEOUT
+#    2 mode=object error_code=GEMINI_RATE_LIMITED
+#    1 mode=label error_code=PARSE_ERROR
+
+# 時間帯別の error_code 推移（5分刻み、スパイクの検出に有効）
+sudo journalctl -u gemini-scanner --since "1 hour ago" -o short-iso \
+  | grep "event=api_failure" \
+  | awk -F'[T:]' '{printf "%s:%s:%02d0 ", $1, $2, int($3/10)*10}{for(i=1;i<=NF;i++) if($i~/error_code/) print $i}' \
+  | sort | uniq -c
+```
+
+### error_code 別の対応判断表
+
+| error_code | 急増時の対応 |
+|------------|------------|
+| `GEMINI_RATE_LIMITED` | APIクォータの残量確認。`RATE_LIMIT_PER_MINUTE` の引き下げを検討 |
+| `API_400` | Gemini API仕様変更の可能性。プロンプト・スキーマを確認 |
+| `API_500` / `API_503` | Google Cloud Status Dashboard を確認。一時的なら待機 |
+| `TIMEOUT` | ネットワーク遅延 or Gemini高負荷。プロキシ設定・タイムアウト値を確認 |
+| `CONNECTION_ERROR` | DNS障害 or ファイアウォール。`/readyz?check_api=true` で切り分け |
+| `PARSE_ERROR` | APIレスポンス形式の変更。`gemini_api.py` のパーサーを確認 |
+| `SAFETY_BLOCKED` | 送信画像の内容が不適切。特定IPからの集中送信なら制限強化を検討 |
+| `INCOMPLETE_RESPONSE` | MAX_TOKENS到達。送信画像サイズやプロンプト長を確認 |
 
 ### request_id によるログ追跡
 
@@ -357,9 +406,12 @@ event=server_error request_id=h8g7f6e5d4c3b2a1 ip=192.168.1.1 mode=text error=..
 # 特定リクエストの全ログを抽出
 sudo journalctl -u gemini-scanner | grep "request_id=a1b2c3d4e5f6g7h8"
 
-# エラーコード別の集計（直近1時間）
-sudo journalctl -u gemini-scanner --since "1 hour ago" | grep "event=api_failure" | grep -oP 'error_code=\S+' | sort | uniq -c | sort -rn
+# レート制限の発生頻度（種別別）
+sudo journalctl -u gemini-scanner --since "1 hour ago" \
+  | grep "event=rate_limited" \
+  | grep -oP 'limit_type=\S+' | sort | uniq -c
 
-# レート制限の発生頻度
-sudo journalctl -u gemini-scanner --since "1 hour ago" | grep "event=rate_limited" | wc -l
+# 出力例:
+#   8 limit_type=minute
+#   1 limit_type=daily
 ```
