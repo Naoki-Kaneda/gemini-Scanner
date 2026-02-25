@@ -678,8 +678,9 @@ class TestWebParser:
 
     def test_空レスポンスで空を返す(self):
         from gemini_api import _parse_gemini_web_response
-        data, detail = _parse_gemini_web_response({})
-        assert data == []
+        result = _parse_gemini_web_response({})
+        assert result["data"] == []
+        detail = result["web_detail"]
         assert detail["best_guess"] == ""
         assert detail["entities"] == []
         assert detail["pages"] == []
@@ -687,7 +688,7 @@ class TestWebParser:
 
     def test_AI識別結果を正しくパースする(self):
         from gemini_api import _parse_gemini_web_response
-        data, detail = _parse_gemini_web_response({
+        result = _parse_gemini_web_response({
             "best_guess": "トルクレンチ",
             "entities": [
                 {"name": "TOHNICHI", "score": 0.85},
@@ -695,13 +696,14 @@ class TestWebParser:
             ],
             "description": "東日製作所のトルクレンチ",
         })
+        detail = result["web_detail"]
         assert detail["best_guess"] == "トルクレンチ"
         assert len(detail["entities"]) == 2
         assert detail["entities"][0]["name"] == "TOHNICHI"
         # Geminiバージョンではpages/similar_imagesは常に空
         assert detail["pages"] == []
         assert detail["similar_images"] == []
-        assert any("トルクレンチ" in d["label"] for d in data)
+        assert any("トルクレンチ" in d["label"] for d in result["data"])
 
 
 # ─── ラベル判定パーサーテスト ─────────────────────────
@@ -710,26 +712,26 @@ class TestLabelParser:
 
     def test_ラベル検出時はlabel_detectedがTrueになる(self):
         from gemini_api import _parse_gemini_label_response
-        data, detected, reason = _parse_gemini_label_response({
+        result = _parse_gemini_label_response({
             "label_detected": True,
             "reason": "テキスト検出: 「Product A」",
             "texts": [
                 {"text": "Product A", "box_2d": [100, 100, 200, 400]},
             ],
         }, [640, 480])
-        assert detected is True
-        assert "テキスト検出" in reason
-        assert len(data) == 1
-        assert data[0]["label"] == "Product A"
+        assert result["label_detected"] is True
+        assert "テキスト検出" in result["label_reason"]
+        assert len(result["data"]) == 1
+        assert result["data"][0]["label"] == "Product A"
 
     def test_ラベル未検出時はlabel_detectedがFalseになる(self):
         from gemini_api import _parse_gemini_label_response
-        data, detected, reason = _parse_gemini_label_response({
+        result = _parse_gemini_label_response({
             "label_detected": False,
             "reason": "テキスト・ラベル関連の物体が検出されませんでした",
         }, None)
-        assert detected is False
-        assert len(data) == 0
+        assert result["label_detected"] is False
+        assert len(result["data"]) == 0
 
 
 # ─── MIME整合テスト（PNG入力が全モードでJPEG変換されること） ──────

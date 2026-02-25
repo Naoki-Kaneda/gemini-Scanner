@@ -61,8 +61,7 @@ def _mask_proxy_url(url):
 
 VERIFY_SSL = os.getenv("VERIFY_SSL", "true").lower() != "false"
 
-# 許可されるモード値
-VALID_MODES = {"text", "object", "label", "face", "logo", "classify", "web"}
+# VALID_MODES: _MODE_HANDLERS から自動導出（ファイル末尾で定義）
 
 # ─── Gemini API プロンプト設計 ─────────────────────────
 MODE_PROMPTS = {
@@ -811,7 +810,7 @@ def detect_content(image_b64, mode="text", request_id="", context_hint=""):
 
     # 全モード共通: JPEG変換（MIME整合保証）。text/labelのみ画質強調も実施
     try:
-        image_b64 = _ensure_jpeg(image_b64, enhance=mode in ("text", "label"))
+        image_b64 = _ensure_jpeg(image_b64, enhance=_MODE_HANDLERS[mode]["enhance"])
     except ValueError:
         # 安全チェック違反（画像サイズ超過等）はスキップ不可 → 呼び出し元へ伝播
         raise
@@ -913,7 +912,7 @@ def _parse_gemini_label_response(gemini_data, image_size):
         else:
             reason = "テキスト・ラベル関連の物体が検出されませんでした"
 
-    return results, label_detected, reason
+    return {"data": results, "label_detected": label_detected, "label_reason": reason}
 
 
 def _parse_gemini_object_response(gemini_data):
@@ -1098,25 +1097,31 @@ def _parse_gemini_web_response(gemini_data):
         "similar_images": [],  # Geminiではweb検索不可のため常に空
     }
 
-    return data, web_detail
+    return {"data": data, "web_detail": web_detail}
 
 
 # ─── モード別ディスパッチ ──────────────────────────
 # 各モードのパーサー・image_size要否・ログラベルを一元管理
 _MODE_HANDLERS = {
-    "text":     {"parser": _parse_gemini_text_response,     "needs_image_size": True,  "log": "テキスト検出"},
-    "object":   {"parser": _parse_gemini_object_response,   "needs_image_size": False, "log": "物体検出"},
-    "label":    {"parser": _parse_gemini_label_response,    "needs_image_size": True,  "log": "ラベル検出"},
-    "face":     {"parser": _parse_gemini_face_response,     "needs_image_size": True,  "log": "顔検出"},
-    "logo":     {"parser": _parse_gemini_logo_response,     "needs_image_size": True,  "log": "ロゴ検出"},
-    "classify": {"parser": _parse_gemini_classify_response, "needs_image_size": False, "log": "分類タグ"},
-    "web":      {"parser": _parse_gemini_web_response,      "needs_image_size": False, "log": "AI識別"},
+    "text":     {"parser": _parse_gemini_text_response,     "needs_image_size": True,  "enhance": True,  "log": "テキスト検出"},
+    "object":   {"parser": _parse_gemini_object_response,   "needs_image_size": False, "enhance": False, "log": "物体検出"},
+    "label":    {"parser": _parse_gemini_label_response,    "needs_image_size": True,  "enhance": True,  "log": "ラベル検出"},
+    "face":     {"parser": _parse_gemini_face_response,     "needs_image_size": True,  "enhance": False, "log": "顔検出"},
+    "logo":     {"parser": _parse_gemini_logo_response,     "needs_image_size": True,  "enhance": False, "log": "ロゴ検出"},
+    "classify": {"parser": _parse_gemini_classify_response, "needs_image_size": False, "enhance": False, "log": "分類タグ"},
+    "web":      {"parser": _parse_gemini_web_response,      "needs_image_size": False, "enhance": False, "log": "AI識別"},
 }
+
+# 許可モードは _MODE_HANDLERS のキーから自動導出（手動同期を排除）
+VALID_MODES = frozenset(_MODE_HANDLERS.keys())
 
 
 def _dispatch_mode_handler(mode, gemini_data, image_b64):
     """
     モードに応じたパーサーを呼び出し、統一された成功レスポンスを返す。
+
+    パーサーは list（通常モード）または dict（追加フィールドありモード）を返す。
+    dict の場合は "data" キーを取り出し、残りのキーは _make_success に展開される。
 
     Args:
         mode: 検出モード文字列。
@@ -1130,22 +1135,17 @@ def _dispatch_mode_handler(mode, gemini_data, image_b64):
     parser_func = handler["parser"]
     image_size = _get_image_dimensions(image_b64) if handler["needs_image_size"] else None
 
-    # label/web は特殊な戻り値を持つ
-    if mode == "label":
-        data, label_detected, label_reason = parser_func(gemini_data, image_size)
-        logger.info("%s結果: detected=%s, reason=%s", handler["log"], label_detected, label_reason)
-        return _make_success(data, image_size, label_detected=label_detected, label_reason=label_reason)
+    # パーサー呼び出し（image_size が必要なモードのみ引数に追加）
+    args = (gemini_data, image_size) if handler["needs_image_size"] else (gemini_data,)
+    result = parser_func(*args)
 
-    if mode == "web":
-        data, web_detail = parser_func(gemini_data)
-        logger.info("%s結果: entities=%d件", handler["log"], len(web_detail.get("entities", [])))
-        return _make_success(data, web_detail=web_detail)
-
-    # 共通パターン: parser(gemini_data) or parser(gemini_data, image_size)
-    if handler["needs_image_size"]:
-        data = parser_func(gemini_data, image_size)
+    # パーサーの戻り値: dict → "data" + 追加フィールド, list → データのみ
+    if isinstance(result, dict):
+        data = result.pop("data")
+        extra = result
     else:
-        data = parser_func(gemini_data)
+        data = result
+        extra = {}
 
     logger.info("%s結果: %d件", handler["log"], len(data))
-    return _make_success(data, image_size)
+    return _make_success(data, image_size, **extra)
