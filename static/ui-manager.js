@@ -975,3 +975,82 @@ export function setScanningUI(active) {
         if (statusDot)      statusDot.classList.remove('active');
     }
 }
+
+
+// ─────────────────────────────────────────────
+// 19. 状態ベース UI 同期
+//     transitionTo() から自動的に呼ばれ、状態に応じた UI を一括適用する
+// ─────────────────────────────────────────────
+
+/**
+ * スキャン状態に応じてUIを一括同期する。
+ * transitionTo() の遷移成功時に自動的に呼ばれるため、
+ * 個々の関数内でボタン状態やクラスを手動操作する必要がなくなる。
+ *
+ * 各状態の UI 定義:
+ *   IDLE:             ▶ スタート, enabled, scanning OFF, bar hidden
+ *   SCANNING:         ⏹ ストップ, enabled, scanning ON （bar はコンテキスト依存）
+ *   ANALYZING:        ⏳ 解析中, disabled, scanning OFF, bar hidden
+ *   PAUSED_ERROR:     ⏹ ストップ, enabled, scanning ON
+ *   PAUSED_DUPLICATE: ⏹ ストップ, enabled, scanning ON, bar paused-duplicate
+ *   COOLDOWN:         ⏳ 待機中, disabled + dimmed, scanning OFF, bar cooldown
+ *
+ * @param {string} state - ScanState 列挙値
+ */
+export function syncUI(state) {
+    // ── COOLDOWN で付加された opacity/cursor をリセット ──
+    if (btnScan) {
+        btnScan.style.opacity = '';
+        btnScan.style.cursor  = '';
+    }
+
+    switch (state) {
+        case ScanState.IDLE:
+            setScanningUI(false);
+            if (btnScan) btnScan.disabled = false;
+            showStabilityBar(false);
+            resetStabilityBar();
+            break;
+
+        case ScanState.SCANNING:
+            setScanningUI(true);
+            if (btnScan) btnScan.disabled = false;
+            // 安定化バーはコンテキスト依存（カメラ/静止画/連続スキャン）のため変更しない
+            break;
+
+        case ScanState.ANALYZING:
+            setBtnScanContent('⏳', '解析中');
+            if (btnScan)        { btnScan.disabled = true;  btnScan.classList.remove('scanning'); }
+            if (videoContainer) videoContainer.classList.remove('scanning');
+            if (statusDot)      statusDot.classList.remove('active');
+            showStabilityBar(false);
+            break;
+
+        case ScanState.PAUSED_ERROR:
+        case ScanState.PAUSED_DUPLICATE:
+            // 一時停止中: ストップボタンを維持（ユーザーが手動停止できるように）
+            setBtnScanContent('⏹', 'ストップ');
+            if (btnScan) { btnScan.disabled = false; btnScan.classList.add('scanning'); }
+            if (videoContainer) videoContainer.classList.add('scanning');
+            if (statusDot)      statusDot.classList.add('active');
+            if (state === ScanState.PAUSED_DUPLICATE) {
+                showStabilityBar(true);
+                setStabilityBarState('paused-duplicate');
+            }
+            break;
+
+        case ScanState.COOLDOWN:
+            setBtnScanContent('⏳', '待機中');
+            if (btnScan) {
+                btnScan.disabled      = true;
+                btnScan.style.opacity = '0.5';
+                btnScan.style.cursor  = 'not-allowed';
+                btnScan.classList.remove('scanning');
+            }
+            if (videoContainer) videoContainer.classList.remove('scanning');
+            if (statusDot)      statusDot.classList.remove('active');
+            showStabilityBar(true);
+            setStabilityBarState('cooldown');
+            break;
+    }
+}

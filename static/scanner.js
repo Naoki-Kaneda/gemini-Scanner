@@ -21,13 +21,14 @@ import {
 } from './constants.js';
 
 import {
+    syncUI,
     setStatusMessage, resetStabilityBar, setStabilityBarState,
     showStabilityBar, setStabilityBarProgress, getStabilityBarFill,
-    setBtnScanContent, disableScanButton, clearOverlay, drawBoundingBoxes,
-    setScanningUI, updateDupSkipBadge, updateScanModeButton,
+    disableScanButton, clearOverlay, drawBoundingBoxes,
+    updateDupSkipBadge, updateScanModeButton,
     isValidResult, addResultItem, addLabelResult, addFaceResult,
     addClassifyResult, addWebResult, addNoResultMessage, clearResults,
-    setModeButtons, getBtnScan, getVideoContainer, getStatusDot,
+    setModeButtons,
 } from './ui-manager.js';
 
 import {
@@ -168,6 +169,9 @@ export function transitionTo(newState) {
     const prev = scanState;
     scanState  = newState;
     console.log(`状態遷移: ${prev} → ${newState}`);
+
+    // 状態に応じた UI を一括同期する（ボタン・クラス・安定化バー）
+    syncUI(newState);
     return true;
 }
 
@@ -313,17 +317,13 @@ export function startScanning() {
         return;
     }
 
-    // IDLE → SCANNING に遷移できない場合は処理を中断する
+    // IDLE → SCANNING（syncUI が自動でボタン・クラスを更新）
     if (!transitionTo(ScanState.SCANNING)) return;
 
     // 新規スキャン開始時に各カウンターをリセットする
     consecutiveErrorCount = 0;
     lastSentImageHash     = null;
-
-    const btnScan = getBtnScan();
-    setScanningUI(true);
     setStatusMessage('スキャン中');
-    if (btnScan) btnScan.disabled = false;
 
     // 静止画モード: 安定化検出は不要 → 即座に解析を実行する
     const currentSource = getCurrentSource();
@@ -356,6 +356,7 @@ export function startScanning() {
 export function stopScanning() {
     // 強制リセット: どの状態からでも IDLE に戻す（通常の遷移制限を適用しない）
     scanState = ScanState.IDLE;
+    syncUI(ScanState.IDLE);  // ボタン・バー・クラスを一括リセット
 
     // スキャンループを即座に停止する（次フレームの実行を防ぐ）
     if (scanRafId) {
@@ -373,12 +374,11 @@ export function stopScanning() {
         continuousDelayTimerId = null;
     }
 
-    // クールダウンタイマーとボタン状態を復元する
+    // クールダウンタイマーをキャンセルする
     stopCooldownCountdown();
 
-    // オーバーレイをクリアしてUIを停止状態に戻す
+    // オーバーレイのクリアとステータスメッセージ（コンテキスト固有）
     clearOverlay();
-    setScanningUI(false);
     setStatusMessage('準備完了');
 
     // 安定化関連の状態をリセットする
@@ -389,10 +389,6 @@ export function stopScanning() {
     duplicateCount        = 0;
     lastResultFingerprint = null;
     updateDupSkipBadge(scanState, duplicateCount, DUPLICATE_SKIP_COUNT);
-
-    // 安定化バーを非表示にして全状態クラスをクリアする
-    showStabilityBar(false);
-    resetStabilityBar();
 }
 
 
@@ -628,17 +624,7 @@ async function captureAndAnalyze() {
         scanRafId = null;
     }
 
-    // 解析中のUI状態に切り替える（ボタン無効化・安定化バー非表示）
-    showStabilityBar(false);
-    setBtnScanContent('⏳', '解析中');
-    const btnScan = getBtnScan();
-    if (btnScan) btnScan.disabled = true;
-
-    // scanning クラスとステータスドットを解析待機状態に更新する
-    const vc = getVideoContainer();
-    if (vc) vc.classList.remove('scanning');
-    const sd = getStatusDot();
-    if (sd) sd.classList.remove('active');
+    // ボタン・安定化バー・scanning クラスは syncUI(ANALYZING) で設定済み
 
     /** API 成功フラグ（finally での完了メッセージ表示に使用） */
     let succeeded = false;
@@ -781,23 +767,23 @@ async function captureAndAnalyze() {
     } finally {
         // ─── finally: 次の状態への遷移処理（3分岐） ───
         // PAUSED_ERROR や COOLDOWN に遷移済みの場合はそのまま維持する
+        // 各 transitionTo() が syncUI() を自動呼び出しするため、手動 UI 操作は不要
         if (scanState === ScanState.ANALYZING) {
 
             if (_pendingDuplicatePause && wasStreamingScan) {
                 // 【分岐1】重複停止:
                 // SCANNING 経由で PAUSED_DUPLICATE に遷移し、スキャンループを再開する
-                // 安定化バーを「重複停止中」表示（パープル点滅）にする
+                // syncUI(PAUSED_DUPLICATE) が安定化バーの paused-duplicate 表示を自動設定
                 transitionTo(ScanState.SCANNING);
                 transitionTo(ScanState.PAUSED_DUPLICATE);
-                setStabilityBarState('paused-duplicate');
-                showStabilityBar(true);
                 scanRafId = requestAnimationFrame(scanLoop);
 
             } else if (!isSingleShot && wasStreamingScan) {
                 // 【分岐2】連続よみモード:
                 // SCANNING に遷移してインターバル後にスキャンループを再開する
-                // 安定化バーを「待機中」表示（青: インターバル中を視覚化）にする
+                // syncUI(SCANNING) がボタンを「ストップ」に設定済み
                 transitionTo(ScanState.SCANNING);
+                // 安定化バーを「待機中」表示（青: インターバル中を視覚化）にする
                 showStabilityBar(true);
                 setStabilityBarState('interval-wait');
                 setStatusMessage('完了 ― 次のスキャンまで待機中...');
@@ -816,31 +802,14 @@ async function captureAndAnalyze() {
 
             } else {
                 // 【分岐3】ワンショット / 静止画:
-                // IDLE に遷移してスキャンを完全停止する
+                // IDLE に遷移してスキャンを完全停止する（syncUI(IDLE) で自動 UI リセット）
                 transitionTo(ScanState.IDLE);
             }
         }
 
-        // ─── UI 復帰: 次の状態に応じてボタン表示を切り替える ───
-        const btnScanFinal = getBtnScan();
-        if (scanState === ScanState.SCANNING || scanState === ScanState.PAUSED_DUPLICATE) {
-            // スキャン継続中: ストップボタンの表示を維持する
-            if (btnScanFinal) {
-                btnScanFinal.disabled = false;
-                setBtnScanContent('⏹', 'ストップ');
-                btnScanFinal.classList.add('scanning');
-            }
-        } else {
-            // スキャン終了: スタートボタンに戻す
-            if (btnScanFinal) {
-                btnScanFinal.disabled = false;
-                setBtnScanContent('▶', 'スタート');
-                btnScanFinal.classList.remove('scanning');
-            }
-            // 成功して IDLE に戻った場合は完了メッセージを表示する
-            if (succeeded && scanState === ScanState.IDLE) {
-                setStatusMessage('完了 ― スタートで再スキャン');
-            }
+        // 成功して IDLE に戻った場合は完了メッセージを表示する（コンテキスト固有）
+        if (succeeded && scanState === ScanState.IDLE) {
+            setStatusMessage('完了 ― スタートで再スキャン');
         }
     }
 }
@@ -902,17 +871,8 @@ function startCooldownCountdown(seconds) {
     const totalSeconds = seconds;
     cooldownRemaining  = seconds;
 
-    // スキャンボタンを無効化してクールダウン中であることを明示する
-    const btnScan = getBtnScan();
-    if (btnScan) {
-        btnScan.disabled      = true;
-        btnScan.style.opacity = '0.5';
-        btnScan.style.cursor  = 'not-allowed';
-    }
-
-    // 安定化バーをクールダウン進捗表示に転用する（オレンジ色で100%→0%に減少）
-    showStabilityBar(true);
-    setStabilityBarState('cooldown');
+    // ボタン（disabled + dimmed）・安定化バー（cooldown 表示）は
+    // transitionTo(COOLDOWN) → syncUI(COOLDOWN) で設定済み
 
     // 1秒ごとにカウントダウンして残り時間を更新する
     cooldownTimerId = setInterval(() => {
@@ -935,28 +895,19 @@ function startCooldownCountdown(seconds) {
  * クールダウン中にスタートが押されていた場合は自動的にスキャンを開始する。
  */
 function stopCooldownCountdown() {
+    const wasActive = cooldownTimerId !== null;
+
     if (cooldownTimerId) {
         clearInterval(cooldownTimerId);
         cooldownTimerId = null;
     }
     cooldownRemaining = 0;
 
-    // スキャンボタンのスタイルを復帰させる
-    const btnScan = getBtnScan();
-    if (btnScan) {
-        btnScan.disabled      = false;
-        btnScan.style.opacity = '';
-        btnScan.style.cursor  = '';
-    }
-
-    // 安定化バーをリセットして非表示にする
-    showStabilityBar(false);
-    resetStabilityBar();
-
-    // COOLDOWN 状態の場合のみ IDLE に遷移する
-    // （stopScanning() から呼ばれた場合は既に IDLE なので遷移不要）
-    if (scanState === ScanState.COOLDOWN) {
+    // 実際にカウントダウン中だった場合のみ IDLE に遷移する
+    // （stopScanning() から呼ばれた場合は既に IDLE + syncUI 済みなので不要）
+    if (wasActive && scanState === ScanState.COOLDOWN) {
         scanState = ScanState.IDLE;
+        syncUI(ScanState.IDLE);
     }
 
     // クールダウン中にボタンが押されていた場合は自動的にスキャンを開始する
