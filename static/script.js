@@ -65,7 +65,8 @@ function getNetworkQualityMultiplier() {
 
 const MIN_RESULT_LENGTH = 5;         // 結果フィルター: 最小文字数
 const LABEL_MAX_LENGTH = 25;         // バウンディングボックスのラベル最大文字数
-const RETRY_DELAY_MS = 10000;        // エラー後の再試行待機時間（ミリ秒）
+const RETRY_BASE_DELAY_MS = 5000;    // エラー後の再試行基準待機時間（ミリ秒）
+const RETRY_MAX_DELAY_MS = 60000;    // 指数バックオフの最大待機時間（1分）
 const CAPTURE_RESET_DELAY_MS = 3000;       // 撮影完了後の次スキャンまでの待機（ミリ秒） - 短縮
 const LABEL_CAPTURE_RESET_DELAY_MS = 3000; // ラベルモード: 次のスキャンまでの待機（ミリ秒） - 短縮
 const CONTINUOUS_SCAN_INTERVAL_MS = 3000;  // 連続スキャン: 解析完了→次スキャン開始の最低待機（ミリ秒）
@@ -201,6 +202,7 @@ let currentSource = 'camera';
 let currentMode = 'text';
 let isMirrored = false;
 let retryTimerId = null;      // 再試行用タイマーID
+let consecutiveErrorCount = 0;      // 連続エラー回数（指数バックオフの指数）
 let continuousDelayTimerId = null;  // 連続スキャンのインターバルタイマーID
 let cooldownTimerId = null;   // レート制限クールダウンタイマーID
 let cooldownRemaining = 0;    // クールダウン残り秒数（0 = クールダウン中でない）
@@ -740,6 +742,7 @@ function startScanning() {
     }
 
     transitionTo(ScanState.SCANNING);
+    consecutiveErrorCount = 0; // 新規スキャン開始時にバックオフをリセット
     // XSS対策: DOM操作でボタン内容を更新（innerHTML不使用）
     _setBtnScanContent('■', 'ストップ');
     btnScan.classList.add('scanning');
@@ -822,6 +825,12 @@ function scanLoop() {
         return;
     }
     scanFrameCount++;
+    // PAUSED_DUPLICATE: 動き検出のみ必要だが毎フレームは過剰
+    // 15フレームに1回（約2fps@30fps）に間引いてCPU/GPU負荷を大幅軽減
+    if (scanState === ScanState.PAUSED_DUPLICATE && scanFrameCount % 15 !== 0) {
+        scanRafId = requestAnimationFrame(scanLoop);
+        return;
+    }
     checkStabilityAndCapture();
     scanRafId = requestAnimationFrame(scanLoop);
 }
@@ -1147,6 +1156,7 @@ async function captureAndAnalyze() {
         // 成功時のみカウント加算（失敗時はAPI消費しない）
         if (result.ok) {
             succeeded = true;
+            consecutiveErrorCount = 0; // 成功でバックオフをリセット
             lastSentImageHash = currentHash; // 成功時のみハッシュを保存（失敗時は再試行可能）
             apiCallCount++;
             saveApiUsage();
@@ -1290,6 +1300,17 @@ function scheduleRetry() {
 
     if (retryTimerId) clearTimeout(retryTimerId);
 
+    consecutiveErrorCount++;
+    // 指数バックオフ + ジッター（0.75〜1.25のランダム係数でサンダリングハード回避）
+    const jitter = 0.75 + Math.random() * 0.5;
+    const delay = Math.min(
+        RETRY_BASE_DELAY_MS * Math.pow(2, consecutiveErrorCount - 1) * jitter,
+        RETRY_MAX_DELAY_MS
+    );
+    const delaySec = Math.ceil(delay / 1000);
+
+    if (statusText) statusText.textContent = `⚠ エラー ― ${delaySec}秒後に再試行`;
+
     retryTimerId = setTimeout(() => {
         retryTimerId = null;
         // まだ PAUSED_ERROR 状態なら SCANNING に遷移して再開
@@ -1299,7 +1320,7 @@ function scheduleRetry() {
             if (scanRafId) cancelAnimationFrame(scanRafId);
             scanRafId = requestAnimationFrame(scanLoop);
         }
-    }, RETRY_DELAY_MS);
+    }, delay);
 }
 
 /**
