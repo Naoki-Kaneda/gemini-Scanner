@@ -243,7 +243,7 @@ MODE_SCHEMAS = {
 }
 
 API_TIMEOUT_SECONDS = 30  # Gemini 2.5-flash（思考モデル）は応答に時間がかかるため余裕を持たせる
-GEMINI_429_MAX_RETRIES = int(os.getenv("GEMINI_429_MAX_RETRIES", "2"))
+GEMINI_429_MAX_RETRIES = max(0, int(os.getenv("GEMINI_429_MAX_RETRIES", "2")))  # 負値は0に正規化
 GEMINI_429_BACKOFF_BASE_SECONDS = float(os.getenv("GEMINI_429_BACKOFF_BASE_SECONDS", "1.5"))
 
 # ─── エラーコード定数（タイポ防止） ─────────────────────
@@ -320,18 +320,21 @@ def _make_error(error_code, message):
             "error_code": error_code, "message": message}
 
 
+_MAX_RETRY_AFTER_SECONDS = 300  # Retry-After上限（ワーカースリープ防止）
+
+
 def _get_retry_after_seconds(response, fallback_seconds):
-    """Retry-After ヘッダーを秒に正規化して返す（不正値はフォールバック）。"""
+    """Retry-After ヘッダーを秒に正規化して返す（不正値はフォールバック、上限300秒）。"""
     try:
         raw_value = response.headers.get("Retry-After", "")
         if not raw_value:
-            return fallback_seconds
+            return min(fallback_seconds, _MAX_RETRY_AFTER_SECONDS)
         seconds = float(raw_value)
         if seconds < 0:
-            return fallback_seconds
-        return seconds
+            return min(fallback_seconds, _MAX_RETRY_AFTER_SECONDS)
+        return min(seconds, _MAX_RETRY_AFTER_SECONDS)
     except Exception:
-        return fallback_seconds
+        return min(fallback_seconds, _MAX_RETRY_AFTER_SECONDS)
 
 
 # SSL検証無効時のみ警告を抑制
@@ -404,7 +407,11 @@ def _sanitize_box_2d(box_2d):
     """box_2d を 0〜BOX_SCALE 範囲にクランプし、反転ボックスを修正する。"""
     if not box_2d or len(box_2d) != 4:
         return None
-    y_min, x_min, y_max, x_max = [_clamp(v, 0, BOX_SCALE) for v in box_2d]
+    try:
+        coords = [float(v) for v in box_2d]  # 文字列/None を数値に変換（型安全化）
+    except (TypeError, ValueError):
+        return None
+    y_min, x_min, y_max, x_max = [_clamp(v, 0, BOX_SCALE) for v in coords]
     # 反転ボックスの修正（Geminiが稀にmin/maxを逆に返す場合）
     if y_min > y_max:
         y_min, y_max = y_max, y_min
@@ -499,9 +506,14 @@ def _build_translated_label(en_name, ja_name, score, translations):
     """
     if not ja_name:
         ja_name = translations.get(en_name.lower(), "")
+    # score が文字列等の非数値型で渡される場合に備えた型安全変換
+    try:
+        score_val = float(score)
+    except (TypeError, ValueError):
+        score_val = 0.0
     if ja_name:
-        return f"{en_name}（{ja_name}）- {score:.0%}"
-    return f"{en_name} - {score:.0%}"
+        return f"{en_name}（{ja_name}）- {score_val:.0%}"
+    return f"{en_name} - {score_val:.0%}"
 
 
 # ─── 画像共通処理 ─────────────────────────────────
@@ -522,8 +534,9 @@ def _open_image(image_b64):
     image_bytes = base64.b64decode(image_b64)
     img = Image.open(io.BytesIO(image_bytes))
     if img.width * img.height > MAX_IMAGE_PIXELS:
+        w, h = img.width, img.height  # close前に値を保存（close後の参照は非推奨）
         img.close()
-        raise ValueError(f"画像サイズが大きすぎます: {img.width}x{img.height}")
+        raise ValueError(f"画像サイズが大きすぎます: {w}x{h}")
     return img
 
 
@@ -836,6 +849,10 @@ def detect_content(image_b64, mode="text", request_id="", context_hint=""):
     except requests.exceptions.RequestException as e:
         logger.error("[%s] Gemini API通信エラー (mode=%s): %s", request_id, mode, e)
         return _make_error(ERR_REQUEST_ERROR, str(e))
+    except Exception as e:
+        # パーサー内のTypeError/KeyError等をキャッチし、500直行を防止
+        logger.error("[%s] 予期しないエラー (mode=%s): %s", request_id, mode, e, exc_info=True)
+        return _make_error(ERR_PARSE_ERROR, "レスポンスの処理中にエラーが発生しました")
 
 
 # ─── レスポンス解析（内部関数） ──────────────────────
@@ -947,7 +964,10 @@ def _parse_gemini_face_response(gemini_data, image_size):
     faces = gemini_data.get("faces", [])
     results = []
     for idx, face in enumerate(faces, 1):
-        confidence = face.get("confidence", 0)
+        try:
+            confidence = float(face.get("confidence", 0))
+        except (TypeError, ValueError):
+            confidence = 0.0
 
         # 感情データを構造化
         emotions = {
@@ -997,7 +1017,10 @@ def _parse_gemini_logo_response(gemini_data, image_size):
     results = []
     for logo in logos:
         name = logo.get("name", "不明")
-        score = logo.get("score", 0)
+        try:
+            score = float(logo.get("score", 0))
+        except (TypeError, ValueError):
+            score = 0.0
         label = f"{name} - {score:.0%}"
 
         # box_2d → ピクセル座標に変換
@@ -1058,7 +1081,10 @@ def _parse_gemini_web_response(gemini_data):
         data.append({"label": f"推定: {best_guess}"})
     for entity in entities:
         name = entity.get("name", "")
-        score = entity.get("score", 0)
+        try:
+            score = float(entity.get("score", 0))
+        except (TypeError, ValueError):
+            score = 0.0
         if name:
             data.append({"label": f"{name} ({score:.0%})"})
     if description:

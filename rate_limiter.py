@@ -221,20 +221,21 @@ class InMemoryRateLimiter:
         with self._lock:
             entries = list(self._rate_store.get(client_ip, []))
             new_entries = []
-            removed = False
+            removed_from_minute = False
             for e in entries:
-                if not removed and e[1] == request_id:
-                    removed = True
+                if not removed_from_minute and e[1] == request_id:
+                    removed_from_minute = True
                     continue
                 if now - e[0] < 60:
                     new_entries.append(e)
             self._rate_store[client_ip] = new_entries
 
-            if removed:
-                daily = self._daily_store.get(client_ip, {"date": "", "count": 0})
-                if daily.get("date") == today and daily["count"] > 0:
-                    daily["count"] -= 1
-                    self._daily_store[client_ip] = daily
+            # 分リストから見つかった場合も、60秒経過で消えていた場合も、
+            # 日次カウントは確実にデクリメントする（request_idが発行された=カウント済み）
+            daily = self._daily_store.get(client_ip, {"date": "", "count": 0})
+            if daily.get("date") == today and daily["count"] > 0:
+                daily["count"] -= 1
+                self._daily_store[client_ip] = daily
 
     def get_daily_count(self, client_ip):
         """日次カウントを取得する（テスト・監視用）。"""
@@ -247,30 +248,36 @@ class InMemoryRateLimiter:
 
 # ─── バックエンド選択・公開API ─────────────────────
 _backend: Optional[RateLimiterBackend] = None
+_backend_lock = Lock()  # 遅延初期化のスレッド安全性を保証
 
 
 def _get_backend() -> RateLimiterBackend:
-    """設定に基づいてバックエンドを初期化・取得する（遅延初期化）。"""
+    """設定に基づいてバックエンドを初期化・取得する（遅延初期化・ダブルチェックロッキング）。"""
     global _backend
     if _backend is not None:
         return _backend
 
-    if REDIS_URL:
-        try:
-            import redis
-            client = redis.from_url(REDIS_URL, decode_responses=False)
-            client.ping()
-            _backend = RedisRateLimiter(client)
-            # URLの認証情報をマスクしてログ出力
-            safe_url = REDIS_URL.split("@")[-1] if "@" in REDIS_URL else REDIS_URL
-            logger.info("レート制限: Redis バックエンド (%s)", safe_url)
+    with _backend_lock:
+        # ダブルチェック: ロック取得中に別スレッドが初期化した場合を考慮
+        if _backend is not None:
             return _backend
-        except Exception as e:
-            logger.warning("Redis接続失敗、インメモリにフォールバック: %s", e)
 
-    _backend = InMemoryRateLimiter()
-    logger.info("レート制限: インメモリバックエンド（シングルプロセスのみ）")
-    return _backend
+        if REDIS_URL:
+            try:
+                import redis
+                client = redis.from_url(REDIS_URL, decode_responses=False)
+                client.ping()
+                _backend = RedisRateLimiter(client)
+                safe_url = REDIS_URL.split("@")[-1] if "@" in REDIS_URL else REDIS_URL
+                logger.info("レート制限: Redis バックエンド (%s)", safe_url)
+                return _backend
+            except Exception as e:
+                # 接続エラーメッセージにパスワードが含まれる可能性があるため型名のみログ出力
+                logger.warning("Redis接続失敗、インメモリにフォールバック: %s", type(e).__name__)
+
+        _backend = InMemoryRateLimiter()
+        logger.info("レート制限: インメモリバックエンド（シングルプロセスのみ）")
+        return _backend
 
 
 def try_consume_request(client_ip):
@@ -297,7 +304,9 @@ def get_backend_type():
 
 
 def reset_for_testing():
-    """テスト用: バックエンドをインメモリにリセットする。"""
+    """テスト用: バックエンドをインメモリにリセットする。本番環境での誤呼び出しを防止。"""
+    if not os.getenv("PYTEST_CURRENT_TEST") and os.getenv("FLASK_ENV") not in ("testing", "development", None):
+        raise RuntimeError("reset_for_testing() はテスト環境以外から呼び出せません")
     global _backend
     _backend = InMemoryRateLimiter()
     return _backend

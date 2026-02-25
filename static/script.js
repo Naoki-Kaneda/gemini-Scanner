@@ -378,7 +378,7 @@ function updateApiCounter() {
 /** API上限に達しているか判定する。達している場合はスキャンを停止。 */
 function isApiLimitReached() {
     if (ENFORCE_CLIENT_DAILY_LIMIT && apiCallCount >= API_DAILY_LIMIT) {
-        statusText.textContent = '⚠ API上限に達しました（本日分）';
+        if (statusText) statusText.textContent = '⚠ API上限に達しました（本日分）';
         stopScanning();
         disableScanButton('API上限（本日分）');
         return true;
@@ -704,13 +704,20 @@ function startScanning() {
     if (stabilityBarFill) stabilityBarFill.style.width = '0%';
 
     scanFrameCount = 0;
-    requestAnimationFrame(scanLoop);
+    // 前回のループが残っていれば確実に停止してから新ループを開始
+    if (scanRafId) cancelAnimationFrame(scanRafId);
+    scanRafId = requestAnimationFrame(scanLoop);
 }
 
 /** スキャンを停止してUIをリセットする。 */
 function stopScanning() {
     isScanning = false;
     isPausedByError = false;
+    // スキャンループを即座に停止（次フレーム実行を防止）
+    if (scanRafId) {
+        cancelAnimationFrame(scanRafId);
+        scanRafId = null;
+    }
     if (retryTimerId) {
         clearTimeout(retryTimerId);
         retryTimerId = null;
@@ -740,11 +747,15 @@ function stopScanning() {
 
 /** requestAnimationFrameベースのスキャンループ。 */
 let scanFrameCount = 0;
+let scanRafId = null;  // cancelAnimationFrame 用IDを保持（ループ並走防止）
 function scanLoop() {
-    if (!isScanning) return;
+    if (!isScanning) {
+        scanRafId = null;
+        return;
+    }
     scanFrameCount++;
     checkStabilityAndCapture();
-    requestAnimationFrame(scanLoop);
+    scanRafId = requestAnimationFrame(scanLoop);
 }
 
 /**
@@ -989,6 +1000,7 @@ async function captureAndAnalyze() {
         if (similarity >= IMAGE_HASH_THRESHOLD) {
             console.log(`画像ハッシュ一致 (類似度: ${(similarity * 100).toFixed(1)}%) — API送信スキップ`);
             if (statusText) statusText.textContent = '前回と同じ画像のためスキップしました';
+            isAnalyzing = false;  // ハッシュスキップ時もフラグを確実に解除（永久ブロック防止）
             isScanning = false;
             if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
             _setBtnScanContent('📷', 'スタート');
@@ -1003,6 +1015,8 @@ async function captureAndAnalyze() {
     const imageData = canvas.toDataURL('image/jpeg', effectiveQuality);
 
     // シングルショット: キャプチャ完了後、スキャンループを停止して解析待機状態に遷移
+    // エラー時の自動復帰判定用に、カメラ/ファイルストリームからのスキャンだったかを記録
+    const wasStreamingScan = (currentSource === 'camera');
     isScanning = false;
     if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
     _setBtnScanContent('⏳', '解析中');
@@ -1122,8 +1136,9 @@ async function captureAndAnalyze() {
             }
         }
         console.error('通信エラー:', err);
-        // 連続スキャン中なら一定時間後に自動復帰を試みる
-        if (isScanning) {
+        // カメラスキャン中のエラーなら一定時間後に自動復帰を試みる
+        // （isScanning はキャプチャ時点で false にセット済みなので、事前保存した wasStreamingScan で判定）
+        if (wasStreamingScan) {
             scheduleRetry();
         }
     } finally {
@@ -1142,7 +1157,7 @@ async function captureAndAnalyze() {
  * エラー発生時の再試行スケジュール
  */
 function scheduleRetry() {
-    if (!isScanning && !isPausedByError) return; // 手動停止済みななら何もしない
+    if (!isScanning && !isPausedByError) return; // 手動停止済みなら何もしない
 
     isScanning = false;
     isPausedByError = true;
@@ -1156,7 +1171,8 @@ function scheduleRetry() {
             isScanning = true;
             isPausedByError = false;
             if (statusText) statusText.textContent = 'スキャン中';
-            requestAnimationFrame(scanLoop);
+            if (scanRafId) cancelAnimationFrame(scanRafId);
+            scanRafId = requestAnimationFrame(scanLoop);
         }
     }, RETRY_DELAY_MS);
 }
@@ -1777,10 +1793,13 @@ function init() {
     }
 
     // 画面離脱時にカメラとスキャンを停止（LED点灯残り + API誤発火防止）
+    // 画面復帰時にカメラモードならストリームを自動再開（映像停止を防止）
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             if (isScanning) stopScanning();
             stopCameraStream();
+        } else if (currentSource === 'camera') {
+            setupCamera();
         }
     });
 

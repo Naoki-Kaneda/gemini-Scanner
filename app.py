@@ -346,7 +346,8 @@ def readyz():
             checks["api_reachable"] = False
             warnings_list.append("Gemini API (generativelanguage.googleapis.com) のDNS解決に失敗しました")
 
-    all_ok = bool(API_KEY) and not redis_fallback and checks.get("api_reachable", True)
+    # check_apiはオプショナル診断のため、DNS失敗でもall_okには影響させない（Pod再起動防止）
+    all_ok = bool(API_KEY) and not redis_fallback
 
     response_data = {
         "status": "ok" if all_ok else "not_ready",
@@ -514,11 +515,12 @@ def analyze_endpoint():
     client_ip, rate_key = _build_rate_key()
     limited, limit_message, payload = try_consume_request(rate_key)
     if limited:
-        is_daily = "日" in limit_message
+        # payload=None は日次超過、payload=int は分制限超過（待機秒数）
+        is_daily = payload is None
         _log("info", "rate_limited", ip=client_ip, reason=limit_message,
              limit_type="daily" if is_daily else "minute")
-        # 日次制限は60秒（翌日まで復旧しない）、分制限は計算された待機秒数を通知
-        retry_after = str(payload) if (payload and not is_daily) else "60"
+        # 日次制限は翌日まで復旧しないため長めに設定、分制限は計算された待機秒数を通知
+        retry_after = str(payload) if not is_daily else "60"
         response = jsonify({
             "ok": False,
             "data": [],
@@ -550,7 +552,8 @@ def analyze_endpoint():
     except ValueError as e:
         release_request(rate_key, request_id)
         _log("warning", "validation_error", ip=client_ip, mode=mode, error=str(e))
-        return _error_response(ERR_VALIDATION_ERROR, str(e))
+        # 内部パス等の情報漏洩を防止するため、汎用メッセージをクライアントに返す
+        return _error_response(ERR_VALIDATION_ERROR, "リクエストの処理に失敗しました")
 
     except Exception as e:
         release_request(rate_key, request_id)
