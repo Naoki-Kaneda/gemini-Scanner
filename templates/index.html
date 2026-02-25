@@ -55,6 +55,7 @@
                     <div class="video-tools">
                         <button id="btn-flip-cam" class="tool-btn hidden" title="インカメ/外カメ切替">⟳ 外カメ</button>
                         <button id="btn-mirror" class="tool-btn" title="左右反転">↔ 反転</button>
+                        <button id="btn-scan-mode" class="tool-btn scan-mode-btn" title="連続よみに切替">1x ワンショット</button>
                         <div class="mode-switch-group">
                             <div class="mode-switch">
                                 <button class="mode-btn active" id="mode-text">テキスト</button>
@@ -117,6 +118,13 @@
                                 <span id="duplicate-skip-value" class="help-setting-value">2回</span>
                             </div>
                             <p class="help-setting-desc">同じ内容を指定回数読み取ったら、カメラが動くまで一時停止します。</p>
+                        </div>
+                        <div class="help-setting-item">
+                            <label>スキャンモード</label>
+                            <p class="help-setting-desc">
+                                <strong>ワンショット (1x)</strong>: 1回撮影したら結果を表示して停止します。<br>
+                                <strong>連続よみ (∞)</strong>: 解析完了後も自動的にスキャンを継続し、次の安定フレームを検出して解析を繰り返します。
+                            </p>
                         </div>
                     </div>
                     <div class="help-version">

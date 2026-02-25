@@ -397,6 +397,22 @@ video {
     text-align: center;
 }
 
+/* 連続よみ/ワンショット切替ボタン: テキスト切替時のレイアウトジャンプを防止 */
+.scan-mode-btn {
+    min-width: 8em;
+    text-align: center;
+    transition: background var(--md-motion-standard),
+                color var(--md-motion-standard),
+                border-color var(--md-motion-standard);
+}
+
+/* 連続よみアクティブ時: 緑色ハイライトで視覚フィードバック */
+.scan-mode-btn.continuous-active {
+    background: rgba(0, 255, 136, 0.15);
+    color: #00ff88;
+    border-color: rgba(0, 255, 136, 0.5);
+}
+
 .tool-btn:hover {
     background: rgba(168, 199, 250, 0.08);
     color: var(--md-on-surface);

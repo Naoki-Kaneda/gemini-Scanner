@@ -33,7 +33,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/"
 
 # プロキシ設定（NO_PROXY_MODE=trueなら初期状態でプロキシを無視）

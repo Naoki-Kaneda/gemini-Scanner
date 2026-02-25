@@ -150,7 +150,7 @@ let imageFeed;  // 静止画表示用 <img> 要素
 let resultList, btnScan, statusDot, statusText;
 let videoContainer, stabilityBarContainer, stabilityBarFill;
 let btnProxy, apiCounter, dupSkipBadge, cameraSelector;
-let btnCamera, btnFile, btnFlipCam;
+let btnCamera, btnFile, btnFlipCam, btnScanMode;
 let modeText, modeObject, modeLabel, modeFace, modeLogo, modeClassify, modeWeb;
 
 // ─── スキャン状態機械 ──────────────────────────────
@@ -211,6 +211,7 @@ let videoDevices = [];
 let currentFacingMode = 'environment';  // 'environment'=外カメ, 'user'=インカメ
 let lastFrameData = null;
 let stabilityCounter = 0;
+let isSingleShot = true;  // ワンショットモード（true: 1回で停止、false: 連続スキャン）
 
 // 差分検出用キャンバス（毎フレーム生成せず再利用）
 const motionCanvas = document.createElement('canvas');
@@ -671,6 +672,8 @@ function updateSourceButtons() {
     if (btnCamera) btnCamera.classList.toggle('active', currentSource === 'camera');
     // 'file'（動画）と 'image'（静止画）の両方でファイルボタンをアクティブに
     if (btnFile) btnFile.classList.toggle('active', currentSource === 'file' || currentSource === 'image');
+    // 連続よみボタン: カメラモードでのみ表示（画像モードでは無意味）
+    if (btnScanMode) btnScanMode.classList.toggle('hidden', currentSource !== 'camera');
 }
 
 
@@ -682,6 +685,27 @@ function updateSourceButtons() {
 function resetDuplicateState() {
     duplicateCount = 0;
     lastResultFingerprint = null;
+}
+
+/** 連続よみ/ワンショットモードを切り替える。 */
+function toggleScanMode() {
+    isSingleShot = !isSingleShot;
+    updateScanModeButton();
+    localStorage.setItem('isSingleShot', isSingleShot ? '1' : '0');
+}
+
+/** 連続よみボタンの表示状態を更新する。 */
+function updateScanModeButton() {
+    if (!btnScanMode) return;
+    if (isSingleShot) {
+        btnScanMode.textContent = '1x ワンショット';
+        btnScanMode.classList.remove('continuous-active');
+        btnScanMode.title = '連続よみに切替';
+    } else {
+        btnScanMode.textContent = '∞ 連続よみ';
+        btnScanMode.classList.add('continuous-active');
+        btnScanMode.title = 'ワンショットに切替';
+    }
 }
 
 /** スキャンの開始/停止を切り替える（チャタリング防止: タイムスタンプガード）。 */
@@ -1036,7 +1060,20 @@ async function captureAndAnalyze() {
         if (similarity >= IMAGE_HASH_THRESHOLD) {
             console.log(`画像ハッシュ一致 (類似度: ${(similarity * 100).toFixed(1)}%) — API送信スキップ`);
             if (statusText) statusText.textContent = '前回と同じ画像のためスキップしました';
-            stopScanning(); // 状態機械を IDLE にリセット（UI含む一括リセット）
+            // 連続よみモード: 停止せず被写体の変化を待つ（フレームデータをリセットして再検出）
+            if (!isSingleShot && currentSource === 'camera') {
+                transitionTo(ScanState.SCANNING);
+                stabilityCounter = 0;
+                lastFrameData = null;
+                if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
+                if (stabilityBarFill) {
+                    stabilityBarFill.style.width = '0%';
+                    stabilityBarFill.classList.remove('captured');
+                }
+                scanRafId = requestAnimationFrame(scanLoop);
+                return;
+            }
+            stopScanning(); // ワンショット: 状態機械をIDLEにリセット（UI含む一括リセット）
             return;
         }
     }
@@ -1183,16 +1220,36 @@ async function captureAndAnalyze() {
                 transitionTo(ScanState.SCANNING);
                 transitionTo(ScanState.PAUSED_DUPLICATE);
                 scanRafId = requestAnimationFrame(scanLoop);
+            } else if (!isSingleShot && wasStreamingScan) {
+                // 連続よみモード: SCANNINGに戻してスキャンループを再開
+                transitionTo(ScanState.SCANNING);
+                if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
+                if (stabilityBarFill) {
+                    stabilityBarFill.style.width = '0%';
+                    stabilityBarFill.classList.remove('captured');
+                }
+                if (statusText) statusText.textContent = 'スキャン中';
+                // 安定化カウンターをリセット（次の安定フレーム検出を開始）
+                stabilityCounter = 0;
+                lastStabilityState = 'idle';
+                scanRafId = requestAnimationFrame(scanLoop);
             } else {
                 transitionTo(ScanState.IDLE);
             }
         }
-        // シングルショット: 解析完了、ボタンをスタートに戻す
-        btnScan.disabled = false;
-        _setBtnScanContent('▶', 'スタート');
-        btnScan.classList.remove('scanning');
-        if (succeeded && scanState === ScanState.IDLE && statusText) {
-            statusText.textContent = '完了 ― スタートで再スキャン';
+
+        // UI更新: 連続スキャン続行中はスキャンUIを維持
+        if (scanState === ScanState.SCANNING || scanState === ScanState.PAUSED_DUPLICATE) {
+            btnScan.disabled = false;
+            _setBtnScanContent('■', 'ストップ');
+            btnScan.classList.add('scanning');
+        } else {
+            btnScan.disabled = false;
+            _setBtnScanContent('▶', 'スタート');
+            btnScan.classList.remove('scanning');
+            if (succeeded && scanState === ScanState.IDLE && statusText) {
+                statusText.textContent = '完了 ― スタートで再スキャン';
+            }
         }
     }
 }
@@ -1739,6 +1796,7 @@ function init() {
     btnCamera = document.getElementById('btn-camera');
     btnFile = document.getElementById('btn-file');
     btnFlipCam = document.getElementById('btn-flip-cam');
+    btnScanMode = document.getElementById('btn-scan-mode');
     modeText = document.getElementById('mode-text');
     modeObject = document.getElementById('mode-object');
     modeLabel = document.getElementById('mode-label');
@@ -1781,6 +1839,7 @@ function init() {
     if (btnFile && fileInput) btnFile.addEventListener('click', () => fileInput.click());
     if (fileInput) fileInput.addEventListener('change', handleFileUpload);
     if (btnFlipCam) btnFlipCam.addEventListener('click', toggleFacingMode);
+    if (btnScanMode) btnScanMode.addEventListener('click', toggleScanMode);
     if (btnMirror) btnMirror.addEventListener('click', toggleMirror);
     if (modeText) modeText.addEventListener('click', () => setMode('text'));
     if (modeObject) modeObject.addEventListener('click', () => setMode('object'));
@@ -1842,6 +1901,13 @@ function init() {
             duplicateCount = 0;
         });
     }
+
+    // 連続よみ/ワンショット設定の復元
+    const savedScanMode = localStorage.getItem('isSingleShot');
+    if (savedScanMode !== null) {
+        isSingleShot = savedScanMode !== '0';  // '0' のときのみ連続よみ（false）
+    }
+    updateScanModeButton();
 
     // 画面離脱時にカメラとスキャンを停止（LED点灯残り + API誤発火防止）
     // 画面復帰時にカメラモードならストリームを自動再開（映像停止を防止）

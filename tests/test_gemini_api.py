@@ -426,6 +426,9 @@ class TestResolveThinkingConfig:
         ("gemini-2.5-flash", {"thinkingBudget": 0}),
         ("gemini-2.0-flash", {"thinkingBudget": 0}),
         ("gemini-2.5-flash-preview-05-20", {"thinkingBudget": 0}),
+        # Gemini 2.x Flash Lite系: thinkingBudget: 0（Liteはデフォルトthinking無効）
+        ("gemini-2.5-flash-lite", {"thinkingBudget": 0}),
+        ("gemini-2.5-flash-lite-preview", {"thinkingBudget": 0}),
         # Gemini 2.x Pro系: thinking無効化不可 → 空辞書
         ("gemini-2.5-pro", {}),
         ("gemini-2.5-pro-preview-05-06", {}),
