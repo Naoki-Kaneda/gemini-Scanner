@@ -164,7 +164,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}?v={{ static_hash('script.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='app.js') }}?v={{ static_hash('app.js') }}"></script>
 </body>
 
 </html>
