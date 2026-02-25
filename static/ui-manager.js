@@ -163,14 +163,6 @@ export function getBtnCamera() { return btnCamera; }
 /** ファイルソースボタン要素を返す */
 export function getBtnFile() { return btnFile; }
 
-/**
- * カメラセレクター要素を返す。
- * 注意: cameraSelectorはcamera.jsが管理しているため、このモジュールでは扱わない。
- */
-export function getCameraSelector() {
-    // カメラセレクターは camera.js が管理する（このモジュールでは未管理）
-    return null;
-}
 
 /** ステータスドット要素を返す */
 export function getStatusDot() { return statusDot; }
@@ -960,7 +952,7 @@ export function clearResults() {
  * ボタン表示・scanning クラス・ステータスドットをまとめて切り替える。
  * @param {boolean} active - true でスキャン中UI、false で停止中UIに切り替える
  */
-export function setScanningUI(active) {
+function setScanningUI(active) {
     if (active) {
         // スキャン中のUI状態に切り替える
         setBtnScanContent('⏹', 'ストップ');

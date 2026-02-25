@@ -141,10 +141,54 @@ def _static_file_hash(filename: str) -> str:
         return "0"
 
 
+# ESモジュール群: app.jsが import する全モジュール
+# いずれかが変更されたら app.js の ?v= ハッシュも変わる
+_JS_MODULE_FILES = [
+    "app.js", "constants.js", "ui-manager.js",
+    "api-client.js", "camera.js", "scanner.js",
+]
+_js_bundle_cache: dict[str, object] = {"mtime": 0.0, "hash": "0"}
+
+
+def _js_bundle_hash() -> str:
+    """全JSモジュールの結合ハッシュを返す（ESモジュールのキャッシュバスティング用）。
+
+    どのモジュールを変更しても app.js の ?v= が変わり、
+    既存の immutable キャッシュを持つユーザーも強制更新される。
+    mtime ベースでキャッシュし、ファイル変更時のみ再計算する。
+    """
+    max_mtime = 0.0
+    for name in _JS_MODULE_FILES:
+        try:
+            mt = os.path.getmtime(os.path.join(app.static_folder, name))
+            if mt > max_mtime:
+                max_mtime = mt
+        except OSError:
+            pass
+    if _js_bundle_cache["mtime"] == max_mtime and max_mtime > 0:
+        return _js_bundle_cache["hash"]
+    h = hashlib.md5()
+    for name in _JS_MODULE_FILES:
+        filepath = os.path.join(app.static_folder, name)
+        try:
+            with open(filepath, "rb") as f:
+                h.update(f.read())
+        except OSError:
+            h.update(b"0")
+    digest = h.hexdigest()[:8]
+    _js_bundle_cache["mtime"] = max_mtime
+    _js_bundle_cache["hash"] = digest
+    return digest
+
+
 @app.context_processor
 def inject_template_globals():
     """テンプレートに共通変数を注入する（キャッシュバスティング関数・バージョン）。"""
-    return {"static_hash": _static_file_hash, "app_version": APP_VERSION}
+    return {
+        "static_hash": _static_file_hash,
+        "js_bundle_hash": _js_bundle_hash,
+        "app_version": APP_VERSION,
+    }
 
 
 # プロキシ配下でのIP取得を正しく行う（X-Forwarded-For対応）
@@ -196,10 +240,14 @@ def add_security_headers(response):
     # カメラ・マイクのアクセスを同一オリジンに限定
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(self)"
 
-    # キャッシュ制御: APIとHTMLは no-store、静的ファイルはハッシュ付きURLで長期キャッシュ
+    # キャッシュ制御: APIとHTMLは no-store、静的ファイルは条件分岐
     if request.path.startswith("/static/"):
-        # 静的ファイル: ハッシュ付きURLで配信しているためブラウザキャッシュを活用
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        if request.args.get("v"):
+            # ?v=hash 付き: ファイル内容が変わればURLも変わるため長期キャッシュ安全
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            # ?v= なし（ESモジュールのimport等）: 毎回再検証させる
+            response.headers["Cache-Control"] = "public, no-cache"
     else:
         # API・HTML: キャッシュ無効化（常に最新を返す）
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"

@@ -31,9 +31,6 @@ export const CAMERA_WIDTH = 1280;
 /** カメラ映像の要求解像度 - 高さ（ピクセル） */
 export const CAMERA_HEIGHT = 720;
 
-/** 送信画像のJPEG圧縮品質（0.0 〜 1.0） */
-export const JPEG_QUALITY = 0.95;
-
 /** 有効な解析結果と判断する最小文字数 */
 export const MIN_RESULT_LENGTH = 5;
 

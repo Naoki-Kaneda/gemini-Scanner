@@ -724,15 +724,40 @@ class TestCacheControl:
         cc = response.headers.get("Cache-Control", "")
         assert "no-store" in cc, f"HTMLレスポンスに no-store が含まれない: {cc}"
 
-    def test_静的ファイルはimmutableでキャッシュされる(self, client):
-        """/static/ パスは immutable + 長期キャッシュであること。"""
-        # Flask テストクライアントでは /static/ が実在しなくても after_request は通る
-        # 実際の静的ファイルでテスト
-        response = client.get("/static/style.css")
-        # 404でもafter_requestは実行されるためヘッダーは付与される
+    def test_バージョン付き静的ファイルはimmutableでキャッシュされる(self, client):
+        """/static/?v=hash 付きリクエストは immutable + 長期キャッシュであること。"""
+        response = client.get("/static/style.css?v=abc12345")
         cc = response.headers.get("Cache-Control", "")
-        assert "immutable" in cc, f"静的ファイルに immutable が含まれない: {cc}"
-        assert "max-age=31536000" in cc, f"静的ファイルに max-age=31536000 が含まれない: {cc}"
+        assert "immutable" in cc, f"バージョン付き静的ファイルに immutable が含まれない: {cc}"
+        assert "max-age=31536000" in cc, f"バージョン付き静的ファイルに max-age=31536000 が含まれない: {cc}"
+
+    def test_バージョンなし静的ファイルはno_cacheで再検証される(self, client):
+        """/static/ で ?v= なしのリクエストは no-cache で毎回再検証されること。"""
+        response = client.get("/static/style.css")
+        cc = response.headers.get("Cache-Control", "")
+        assert "no-cache" in cc, f"バージョンなし静的ファイルに no-cache が含まれない: {cc}"
+        assert "immutable" not in cc, f"バージョンなし静的ファイルに immutable が含まれている: {cc}"
+
+
+class TestJsBundleHash:
+    """JSバンドルハッシュが全モジュールの変更を検出することの検証。"""
+
+    def test_バンドルハッシュは8文字の16進数を返す(self, client):
+        """_js_bundle_hash() が8文字の16進ダイジェストを返すこと。"""
+        from app import _js_bundle_hash
+        h = _js_bundle_hash()
+        assert len(h) == 8, f"ハッシュ長が8ではない: {h!r}"
+        assert all(c in "0123456789abcdef" for c in h), f"16進数でない文字を含む: {h!r}"
+
+    def test_バンドルハッシュはテンプレートに注入される(self, client):
+        """index.html の script タグに js_bundle_hash の値が含まれること。"""
+        from app import _js_bundle_hash
+        expected_hash = _js_bundle_hash()
+        response = client.get("/")
+        html = response.data.decode("utf-8")
+        assert f"?v={expected_hash}" in html, (
+            f"HTMLにバンドルハッシュ ?v={expected_hash} が見つからない"
+        )
 
 
 # ─── Request-ID テスト ──────────────────────────
