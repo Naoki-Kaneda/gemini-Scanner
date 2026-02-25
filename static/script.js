@@ -68,6 +68,7 @@ const LABEL_MAX_LENGTH = 25;         // バウンディングボックスのラ�
 const RETRY_DELAY_MS = 10000;        // エラー後の再試行待機時間（ミリ秒）
 const CAPTURE_RESET_DELAY_MS = 3000;       // 撮影完了後の次スキャンまでの待機（ミリ秒） - 短縮
 const LABEL_CAPTURE_RESET_DELAY_MS = 3000; // ラベルモード: 次のスキャンまでの待機（ミリ秒） - 短縮
+const CONTINUOUS_SCAN_INTERVAL_MS = 3000;  // 連続スキャン: 解析完了→次スキャン開始の最低待機（ミリ秒）
 // true にするとクライアント側でも日次上限を強制。既定は false（サーバー側429に委譲）
 const ENFORCE_CLIENT_DAILY_LIMIT = false;
 const FETCH_TIMEOUT_MS = 60000;      // fetch タイムアウト（Gemini API 30秒×リトライ＋余裕）
@@ -200,6 +201,7 @@ let currentSource = 'camera';
 let currentMode = 'text';
 let isMirrored = false;
 let retryTimerId = null;      // 再試行用タイマーID
+let continuousDelayTimerId = null;  // 連続スキャンのインターバルタイマーID
 let cooldownTimerId = null;   // レート制限クールダウンタイマーID
 let cooldownRemaining = 0;    // クールダウン残り秒数（0 = クールダウン中でない）
 let shouldRestartAfterCooldown = false; // クールダウン終了後に自動的にスキャンを開始するか
@@ -782,6 +784,11 @@ function stopScanning() {
         clearTimeout(retryTimerId);
         retryTimerId = null;
     }
+    // 連続スキャンのインターバル待機中なら即キャンセル
+    if (continuousDelayTimerId) {
+        clearTimeout(continuousDelayTimerId);
+        continuousDelayTimerId = null;
+    }
     // レート制限クールダウン中なら停止（ボタンやバーの復帰も含む）
     stopCooldownCountdown();
     clearOverlay();
@@ -800,8 +807,9 @@ function stopScanning() {
     lastResultFingerprint = null;
     updateDupSkipBadge();
 
-    // 安定化バーを非表示
+    // 安定化バーを非表示 + 全状態クラスをクリア
     if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
+    if (stabilityBarFill) stabilityBarFill.classList.remove('captured', 'cooldown', 'interval-wait', 'paused-duplicate');
 }
 
 /** requestAnimationFrameベースのスキャンループ。 */
@@ -900,7 +908,7 @@ function checkStabilityAndCapture() {
             }
             if (stabilityBarFill) {
                 stabilityBarFill.style.width = '0%';
-                stabilityBarFill.classList.remove('captured');
+                stabilityBarFill.classList.remove('captured', 'paused-duplicate', 'interval-wait');
             }
             // テキストは変更しない（バーが0%に戻ることで動き検出を表現）
             lastStabilityState = 'moving';
@@ -1221,20 +1229,37 @@ async function captureAndAnalyze() {
                 // 重複検出: SCANNING経由でPAUSED_DUPLICATEに遷移しスキャンループを再開
                 transitionTo(ScanState.SCANNING);
                 transitionTo(ScanState.PAUSED_DUPLICATE);
+                // 安定化バーを「重複停止中」表示（パープル点滅）
+                if (stabilityBarFill) {
+                    stabilityBarFill.style.width = '100%';
+                    stabilityBarFill.classList.remove('captured', 'interval-wait');
+                    stabilityBarFill.classList.add('paused-duplicate');
+                }
                 scanRafId = requestAnimationFrame(scanLoop);
             } else if (!isSingleShot && wasStreamingScan) {
-                // 連続よみモード: SCANNINGに戻してスキャンループを再開
+                // 連続よみモード: SCANNINGに遷移（→ストップ可能）してインターバル後にループ再開
                 transitionTo(ScanState.SCANNING);
                 if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
+                // 安定化バーを「待機中」表示（青→インターバル中を視覚表示）
                 if (stabilityBarFill) {
-                    stabilityBarFill.style.width = '0%';
+                    stabilityBarFill.style.width = '100%';
                     stabilityBarFill.classList.remove('captured');
+                    stabilityBarFill.classList.add('interval-wait');
                 }
-                if (statusText) statusText.textContent = 'スキャン中';
-                // 安定化カウンターをリセット（次の安定フレーム検出を開始）
-                stabilityCounter = 0;
-                lastStabilityState = 'idle';
-                scanRafId = requestAnimationFrame(scanLoop);
+                if (statusText) statusText.textContent = '完了 ― 次のスキャンまで待機中...';
+                // インターバル後にスキャンループを再開（手動停止でキャンセル可能）
+                continuousDelayTimerId = setTimeout(() => {
+                    continuousDelayTimerId = null;
+                    if (scanState !== ScanState.SCANNING) return; // 手動停止済み
+                    if (stabilityBarFill) {
+                        stabilityBarFill.style.width = '0%';
+                        stabilityBarFill.classList.remove('interval-wait');
+                    }
+                    stabilityCounter = 0;
+                    lastStabilityState = 'idle';
+                    if (statusText) statusText.textContent = 'スキャン中';
+                    scanRafId = requestAnimationFrame(scanLoop);
+                }, CONTINUOUS_SCAN_INTERVAL_MS);
             } else {
                 transitionTo(ScanState.IDLE);
             }
@@ -1378,7 +1403,8 @@ function computeResultFingerprint(result) {
     }
 
     // 共通: data 配列からラベルを抽出してソート結合
-    // 確信度（例: "- 95%"）を除去し、名前のみで比較することで安定した重複検知を実現
+    // 確信度を除去し名前のみで比較 + 検出数をプレフィックスに含めて
+    // 「同じ物体を少し違う角度で見た」ケースの不要なAPI呼び出しを抑制
     if (!result.data || result.data.length === 0) return null;
     const labels = result.data
         .map(item => {
@@ -1389,7 +1415,9 @@ function computeResultFingerprint(result) {
         })
         .filter(l => l.length > 0)
         .sort();
-    return labels.length > 0 ? labels.join('|') : null;
+    if (labels.length === 0) return null;
+    // 検出数をプレフィックスに含めて、物体が増減した場合を区別
+    return `n${labels.length}:${labels.join('|')}`;
 }
 
 /**

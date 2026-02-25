@@ -351,6 +351,24 @@ video {
     transition: width 1s linear;
 }
 
+/* 連続スキャンのインターバル待機中: 青色パルスで「次のスキャンを準備中」を視覚表示 */
+.stability-bar-fill.interval-wait {
+    background: #42A5F5;
+    transition: width 0.3s ease-out;
+    animation: pulse-wait 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-wait {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* 重複検出で一時停止中: パープルの点滅で「カメラ移動待ち」を明示 */
+.stability-bar-fill.paused-duplicate {
+    background: #AB47BC;
+    animation: pulse-wait 1s ease-in-out infinite;
+}
+
 .stability-help {
     color: var(--md-on-surface);
     font-size: 0.75rem;
