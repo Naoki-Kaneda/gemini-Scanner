@@ -196,6 +196,34 @@ class TestDetectContentGeminiErrors:
         assert result["ok"] is False
         assert result["error_code"] == "PARSE_ERROR"
 
+    @pytest.mark.parametrize("finish_reason", ["MAX_TOKENS", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"])
+    @patch("gemini_api.session.post")
+    def test_不完全な終了理由はINCOMPLETE_RESPONSEを返す(self, mock_post, finish_reason):
+        """finishReasonがSTOP/SAFETY以外の場合はINCOMPLETE_RESPONSEを返すこと。"""
+        mock_post.return_value = make_mock_response(status_code=200, json_data={
+            "candidates": [{
+                "content": {"parts": [{"text": "{}"}]},
+                "finishReason": finish_reason,
+            }]
+        })
+        from gemini_api import detect_content
+        result = detect_content(make_b64(), mode="text")
+        assert result["ok"] is False
+        assert result["error_code"] == "INCOMPLETE_RESPONSE"
+
+    @patch("time.sleep")
+    @patch("gemini_api.session.post")
+    def test_429が全リトライ失敗した場合GEMINI_RATE_LIMITEDを返す(self, mock_post, mock_sleep):
+        """429が全リトライ回数を超えた場合はGEMINI_RATE_LIMITEDを返すこと。"""
+        res_429 = make_mock_response(status_code=429)
+        res_429.headers = {"Retry-After": "0"}
+        # MAX_RETRIES=2 なので初回+2リトライ=3回全て429
+        mock_post.return_value = res_429
+        from gemini_api import detect_content
+        result = detect_content(make_b64(), mode="text")
+        assert result["ok"] is False
+        assert result["error_code"] == "GEMINI_RATE_LIMITED"
+
 
 # ─── 座標変換テスト ──────────────────────────────
 class TestCoordinateConversion:
@@ -233,6 +261,24 @@ class TestCoordinateConversion:
         from gemini_api import _gemini_box_to_pixel_vertices
         result = _gemini_box_to_pixel_vertices([0, 0, 1000, 1000], 640, 480)
         assert result == [[0, 0], [640, 0], [640, 480], [0, 480]]
+
+    def test_反転ボックスが正しく修正される(self):
+        """y_min > y_max の反転ボックスが自動修正されること。"""
+        from gemini_api import _gemini_box_to_pixel_vertices
+        # 反転: y_min=500 > y_max=100 → 修正後: y_min=100, y_max=500
+        result = _gemini_box_to_pixel_vertices([500, 200, 100, 800], 640, 480)
+        assert result == [[128, 48], [512, 48], [512, 240], [128, 240]]
+
+    def test_box_2dに文字列が含まれても安全に処理される(self):
+        """box_2d に文字列型の数値が含まれてもfloat変換で正常処理されること。"""
+        from gemini_api import _gemini_box_to_pixel_vertices
+        result = _gemini_box_to_pixel_vertices(["100", "200", "500", "800"], 640, 480)
+        assert result == [[128, 48], [512, 48], [512, 240], [128, 240]]
+
+    def test_box_2dにNoneが含まれると空リストを返す(self):
+        """box_2d にNoneが含まれる場合は安全に空リストを返すこと。"""
+        from gemini_api import _gemini_box_to_pixel_vertices
+        assert _gemini_box_to_pixel_vertices([None, 200, 500, 800], 640, 480) == []
 
 
 # ─── パーサー境界ケース ───────────────────────────

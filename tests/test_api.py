@@ -408,6 +408,17 @@ class TestProxySecurity:
 class TestRateLimitAtomicity:
     """レート制限のアトミック性テスト。"""
 
+    @staticmethod
+    def _get_rate_key():
+        """テストクライアントが使うレート制限キーを再現する（ip_uaモード対応）。"""
+        import hashlib
+        # Werkzeugテストクライアントのデフォルト User-Agent の先頭64文字
+        from importlib.metadata import version as pkg_version
+        ua = "werkzeug/" + pkg_version("werkzeug")
+        ua_fragment = ua[:64]
+        ua_hash = hashlib.sha256(ua_fragment.encode()).hexdigest()[:8]
+        return f"127.0.0.1:{ua_hash}"
+
     @patch("app.detect_content")
     def test_API失敗時にレート制限カウントが戻る(self, mock_detect, client):
         """API失敗時は release_request により予約が取り消されること。"""
@@ -427,7 +438,8 @@ class TestRateLimitAtomicity:
         })
         assert response.status_code == 502
 
-        assert get_daily_count("127.0.0.1") == 0
+        rate_key = self._get_rate_key()
+        assert get_daily_count(rate_key) == 0
 
     @patch("app.detect_content")
     def test_例外発生時もレート制限カウントが戻る(self, mock_detect, client):
@@ -442,7 +454,82 @@ class TestRateLimitAtomicity:
         })
         assert response.status_code == 500
 
-        assert get_daily_count("127.0.0.1") == 0
+        rate_key = self._get_rate_key()
+        assert get_daily_count(rate_key) == 0
+
+
+# ─── Geminiレート制限・分制限テスト ──────────────────
+class TestGeminiRateLimitRelay:
+    """Gemini API側のレート制限が正しくクライアントに中継されるかのテスト。"""
+
+    @patch("app.detect_content")
+    def test_Geminiレート制限時に429とRetryAfterを返す(self, mock_detect, client):
+        """error_code=GEMINI_RATE_LIMITED の場合は429+Retry-After:30を返すこと。"""
+        mock_detect.return_value = {
+            "ok": False,
+            "data": [],
+            "image_size": None,
+            "error_code": "GEMINI_RATE_LIMITED",
+            "message": "Gemini APIレート制限中です。",
+        }
+        response = client.post("/api/analyze", json={
+            "image": create_valid_image_base64(),
+            "mode": "text",
+        })
+        assert response.status_code == 429
+        assert response.headers.get("Retry-After") == "30"
+        data = response.get_json()
+        assert data["error_code"] == "GEMINI_RATE_LIMITED"
+
+    @patch("app.detect_content")
+    def test_ValueError発生時に汎用メッセージで400を返す(self, mock_detect, client):
+        """detect_contentがValueErrorを投げた場合、内部パスを漏洩しない汎用400を返すこと。"""
+        mock_detect.side_effect = ValueError("APIキーが未設定です。.envファイルに設定してください。")
+        response = client.post("/api/analyze", json={
+            "image": create_valid_image_base64(),
+            "mode": "text",
+        })
+        assert response.status_code == 400
+        data = response.get_json()
+        assert data["error_code"] == "VALIDATION_ERROR"
+        # 内部パス情報が漏洩していないことを検証
+        assert ".env" not in data["message"]
+        assert "リクエストの処理に失敗しました" in data["message"]
+
+
+class TestMinuteRateLimit:
+    """分制限超過のテスト。"""
+
+    @patch("app.detect_content")
+    @patch("app.RATE_LIMIT_PER_MINUTE", 1)
+    @patch("rate_limiter.RATE_LIMIT_PER_MINUTE", 1)
+    def test_分制限超過時に429を返す(self, mock_detect, client):
+        """分制限を超えた場合に429+Retry-After+limit_type=minuteを返すこと。"""
+        mock_detect.return_value = {
+            "ok": True,
+            "data": [],
+            "image_size": None,
+            "error_code": None,
+            "message": None,
+        }
+        # 1回目: 通過
+        resp1 = client.post("/api/analyze", json={
+            "image": create_valid_image_base64(),
+            "mode": "text",
+        })
+        assert resp1.status_code == 200
+
+        # 2回目: 分制限超過
+        resp2 = client.post("/api/analyze", json={
+            "image": create_valid_image_base64(),
+            "mode": "text",
+        })
+        assert resp2.status_code == 429
+        data = resp2.get_json()
+        assert data["error_code"] == "APP_RATE_LIMITED"
+        assert data["limit_type"] == "minute"
+        assert "Retry-After" in resp2.headers
+        assert int(resp2.headers["Retry-After"]) > 0
 
 
 # ─── エラーハンドラテスト ──────────────────────
@@ -728,9 +815,20 @@ class TestHealthChecks:
         data = response.get_json()
         assert data["status"] == "ok"
 
-    def test_readyzがAPIキー設定済みで200を返す(self, client):
-        """VISION_API_KEYが設定されていれば /readyz は200を返すこと。"""
+    def test_readyz未認証はstatusのみ返す(self, client):
+        """認証なしの /readyz はstatusのみ返しインフラ情報を公開しないこと。"""
         response = client.get("/readyz")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "ok"
+        # 認証なしでは checks/warnings を公開しない
+        assert "checks" not in data
+        assert "warnings" not in data
+
+    @patch("app.ADMIN_SECRET", "test-secret-readyz")
+    def test_readyz認証済みは詳細情報を返す(self, client):
+        """認証ありの /readyz はchecksを含む詳細情報を返すこと。"""
+        response = client.get("/readyz", headers={"X-Admin-Secret": "test-secret-readyz"})
         assert response.status_code == 200
         data = response.get_json()
         assert data["status"] == "ok"
@@ -745,13 +843,13 @@ class TestHealthChecks:
         assert response.status_code == 503
         data = response.get_json()
         assert data["status"] == "not_ready"
-        assert data["checks"]["api_key_configured"] is False
 
+    @patch("app.ADMIN_SECRET", "test-secret-readyz")
     @patch("app.REDIS_URL", "redis://localhost:6379")
     @patch("app.get_backend_type", return_value="in_memory")
     def test_readyzがRedisフォールバック時に503を返す(self, _mock_backend, client):
-        """REDIS_URL設定済みでインメモリフォールバック時は503+警告を返すこと。"""
-        response = client.get("/readyz")
+        """REDIS_URL設定済みでインメモリフォールバック時は503+警告を返すこと（認証あり）。"""
+        response = client.get("/readyz", headers={"X-Admin-Secret": "test-secret-readyz"})
         assert response.status_code == 503
         data = response.get_json()
         assert data["status"] == "not_ready"
@@ -760,11 +858,12 @@ class TestHealthChecks:
         assert len(data["warnings"]) > 0
         assert "Redis" in data["warnings"][0]
 
+    @patch("app.ADMIN_SECRET", "test-secret-readyz")
     @patch("app.REDIS_URL", "")
     @patch("app.get_backend_type", return_value="in_memory")
     def test_readyzがRedis未設定のインメモリは正常扱い(self, _mock_backend, client):
-        """REDIS_URL未設定でインメモリの場合は意図的なので200を返すこと。"""
-        response = client.get("/readyz")
+        """REDIS_URL未設定でインメモリの場合は意図的なので200を返すこと（認証あり）。"""
+        response = client.get("/readyz", headers={"X-Admin-Secret": "test-secret-readyz"})
         assert response.status_code == 200
         data = response.get_json()
         assert data["status"] == "ok"

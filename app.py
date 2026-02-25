@@ -317,14 +317,24 @@ def healthz():
 def readyz():
     """Readiness: リクエスト処理可能か（APIキー・バックエンド等の設定チェック）
 
+    認証なし: status のみ返す（ヘルスチェックプローブ用）
+    認証あり (X-Admin-Secret): checks・warnings 等の詳細情報を返す
+
     クエリパラメータ:
-        check_api=true: Gemini APIエンドポイントへのDNS到達性も検査する（オプション）
+        check_api=true: Gemini APIエンドポイントへのDNS到達性も検査する（管理者のみ）
     """
     rate_backend = get_backend_type()
 
     # REDIS_URL が設定されているのにインメモリにフォールバックしている場合は警告
     redis_fallback = bool(REDIS_URL) and rate_backend == "in_memory"
 
+    all_ok = bool(API_KEY) and not redis_fallback
+
+    # 認証なし: status のみ（インフラ情報を公開しない）
+    if not _is_admin_authenticated():
+        return jsonify({"status": "ok" if all_ok else "not_ready"}), 200 if all_ok else 503
+
+    # 認証あり: 詳細な診断情報を返す
     checks = {
         "api_key_configured": bool(API_KEY),
         "rate_limiter_backend": rate_backend,
@@ -337,7 +347,7 @@ def readyz():
             "REDIS_URL が設定されていますが、Redis接続に失敗しインメモリにフォールバックしています"
         )
 
-    # オプション: Gemini APIエンドポイントの到達性チェック
+    # オプション: Gemini APIエンドポイントの到達性チェック（管理者のみ）
     if request.args.get("check_api", "").lower() == "true":
         try:
             socket.getaddrinfo("generativelanguage.googleapis.com", 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -345,9 +355,6 @@ def readyz():
         except socket.gaierror:
             checks["api_reachable"] = False
             warnings_list.append("Gemini API (generativelanguage.googleapis.com) のDNS解決に失敗しました")
-
-    # check_apiはオプショナル診断のため、DNS失敗でもall_okには影響させない（Pod再起動防止）
-    all_ok = bool(API_KEY) and not redis_fallback
 
     response_data = {
         "status": "ok" if all_ok else "not_ready",
