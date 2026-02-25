@@ -373,6 +373,37 @@ async function syncApiUsage() {
     }
 }
 
+// ─── 安定化バー操作ヘルパー ──────────────────────────
+// stabilityBarFill の width/classList を一括管理し、散在するDOM操作を集約する。
+// 全状態クラス: captured, cooldown, interval-wait, paused-duplicate
+
+/** 安定化バーをリセットする（0%、全状態クラス除去）。 */
+function resetStabilityBar() {
+    if (!stabilityBarFill) return;
+    stabilityBarFill.style.width = '0%';
+    stabilityBarFill.classList.remove('captured', 'cooldown', 'interval-wait', 'paused-duplicate');
+}
+
+/**
+ * 安定化バーを特定の状態で表示する。
+ * @param {'captured'|'interval-wait'|'paused-duplicate'|'cooldown'} state - バーの状態クラス
+ * @param {number} [widthPercent=100] - バーの幅（%）
+ */
+function setStabilityBarState(state, widthPercent = 100) {
+    if (!stabilityBarFill) return;
+    stabilityBarFill.style.width = `${widthPercent}%`;
+    stabilityBarFill.classList.remove('captured', 'cooldown', 'interval-wait', 'paused-duplicate');
+    stabilityBarFill.classList.add(state);
+}
+
+/** 安定化バーコンテナの表示/非表示を切り替える。 */
+function showStabilityBar(visible) {
+    if (!stabilityBarContainer) return;
+    stabilityBarContainer.classList.toggle('hidden', !visible);
+}
+
+// ─── スキャンボタンUI ──────────────────────────────
+
 /** スキャンボタンの内容をDOM操作で安全に更新する（innerHTML不使用）。 */
 function _setBtnScanContent(iconText, labelText) {
     if (!btnScan) return;
@@ -759,15 +790,15 @@ function startScanning() {
 
     // 静止画モード: 安定化検出不要 → 即座に解析を実行
     if (currentSource === 'image') {
-        if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
+        showStabilityBar(false);
         if (statusText) statusText.textContent = '解析中...';
         captureAndAnalyze();
         return;
     }
 
     // 動画/カメラモード: 安定化バーを表示してスキャンループ開始
-    if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
-    if (stabilityBarFill) stabilityBarFill.style.width = '0%';
+    showStabilityBar(true);
+    resetStabilityBar();
 
     scanFrameCount = 0;
     // 前回のループが残っていれば確実に停止してから新ループを開始
@@ -811,8 +842,8 @@ function stopScanning() {
     updateDupSkipBadge();
 
     // 安定化バーを非表示 + 全状態クラスをクリア
-    if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
-    if (stabilityBarFill) stabilityBarFill.classList.remove('captured', 'cooldown', 'interval-wait', 'paused-duplicate');
+    showStabilityBar(false);
+    resetStabilityBar();
 }
 
 /** requestAnimationFrameベースのスキャンループ。 */
@@ -876,10 +907,7 @@ function checkStabilityAndCapture() {
                 }
                 // 安定完了 → キャプチャ実行
                 lastStabilityState = 'captured';
-                if (stabilityBarFill) {
-                    stabilityBarFill.style.width = '100%';
-                    stabilityBarFill.classList.add('captured');
-                }
+                setStabilityBarState('captured');
                 if (statusText) statusText.textContent = '解析中...';
                 captureAndAnalyze();
                 stabilityCounter = 0;
@@ -894,10 +922,7 @@ function checkStabilityAndCapture() {
                     // モード変更された場合はリセットをスキップ（新モードの状態を壊さない）
                     if (scanState === ScanState.SCANNING && currentMode === capturedMode) {
                         lastStabilityState = 'idle';
-                        if (stabilityBarFill) {
-                            stabilityBarFill.style.width = '0%';
-                            stabilityBarFill.classList.remove('captured');
-                        }
+                        resetStabilityBar();
                         if (statusText) statusText.textContent = 'スキャン中';
                     }
                 }, resetDelay);
@@ -915,10 +940,7 @@ function checkStabilityAndCapture() {
                 if (statusText) statusText.textContent = 'スキャン中';
                 updateDupSkipBadge();
             }
-            if (stabilityBarFill) {
-                stabilityBarFill.style.width = '0%';
-                stabilityBarFill.classList.remove('captured', 'paused-duplicate', 'interval-wait');
-            }
+            resetStabilityBar();
             // テキストは変更しない（バーが0%に戻ることで動き検出を表現）
             lastStabilityState = 'moving';
         }
@@ -1084,11 +1106,8 @@ async function captureAndAnalyze() {
                 transitionTo(ScanState.SCANNING);
                 stabilityCounter = 0;
                 lastFrameData = null;
-                if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
-                if (stabilityBarFill) {
-                    stabilityBarFill.style.width = '0%';
-                    stabilityBarFill.classList.remove('captured');
-                }
+                showStabilityBar(true);
+                resetStabilityBar();
                 scanRafId = requestAnimationFrame(scanLoop);
                 return;
             }
@@ -1105,7 +1124,7 @@ async function captureAndAnalyze() {
     const wasStreamingScan = (currentSource === 'camera');
     // ANALYZING状態ではスキャンループは scanLoop() のガードで自動停止する
     if (scanRafId) { cancelAnimationFrame(scanRafId); scanRafId = null; }
-    if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
+    showStabilityBar(false);
     _setBtnScanContent('⏳', '解析中');
     btnScan.disabled = true;
     if (videoContainer) videoContainer.classList.remove('scanning');
@@ -1240,31 +1259,20 @@ async function captureAndAnalyze() {
                 transitionTo(ScanState.SCANNING);
                 transitionTo(ScanState.PAUSED_DUPLICATE);
                 // 安定化バーを「重複停止中」表示（パープル点滅）
-                if (stabilityBarFill) {
-                    stabilityBarFill.style.width = '100%';
-                    stabilityBarFill.classList.remove('captured', 'interval-wait');
-                    stabilityBarFill.classList.add('paused-duplicate');
-                }
+                setStabilityBarState('paused-duplicate');
                 scanRafId = requestAnimationFrame(scanLoop);
             } else if (!isSingleShot && wasStreamingScan) {
                 // 連続よみモード: SCANNINGに遷移（→ストップ可能）してインターバル後にループ再開
                 transitionTo(ScanState.SCANNING);
-                if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
+                showStabilityBar(true);
                 // 安定化バーを「待機中」表示（青→インターバル中を視覚表示）
-                if (stabilityBarFill) {
-                    stabilityBarFill.style.width = '100%';
-                    stabilityBarFill.classList.remove('captured');
-                    stabilityBarFill.classList.add('interval-wait');
-                }
+                setStabilityBarState('interval-wait');
                 if (statusText) statusText.textContent = '完了 ― 次のスキャンまで待機中...';
                 // インターバル後にスキャンループを再開（手動停止でキャンセル可能）
                 continuousDelayTimerId = setTimeout(() => {
                     continuousDelayTimerId = null;
                     if (scanState !== ScanState.SCANNING) return; // 手動停止済み
-                    if (stabilityBarFill) {
-                        stabilityBarFill.style.width = '0%';
-                        stabilityBarFill.classList.remove('interval-wait');
-                    }
+                    resetStabilityBar();
                     stabilityCounter = 0;
                     lastStabilityState = 'idle';
                     if (statusText) statusText.textContent = 'スキャン中';
@@ -1343,12 +1351,8 @@ function startCooldownCountdown(seconds) {
     }
 
     // 安定化バーをクールダウン進捗に転用（オレンジ色で100%→0%）
-    if (stabilityBarContainer) stabilityBarContainer.classList.remove('hidden');
-    if (stabilityBarFill) {
-        stabilityBarFill.classList.remove('captured');
-        stabilityBarFill.classList.add('cooldown');
-        stabilityBarFill.style.width = '100%';
-    }
+    showStabilityBar(true);
+    setStabilityBarState('cooldown');
 
     cooldownTimerId = setInterval(() => {
         cooldownRemaining--;
@@ -1380,11 +1384,8 @@ function stopCooldownCountdown() {
     }
 
     // 安定化バーをリセット
-    if (stabilityBarContainer) stabilityBarContainer.classList.add('hidden');
-    if (stabilityBarFill) {
-        stabilityBarFill.classList.remove('cooldown');
-        stabilityBarFill.style.width = '0%';
-    }
+    showStabilityBar(false);
+    resetStabilityBar();
 
     // COOLDOWN状態からIDLEに遷移（stopScanningから呼ばれた場合は既にIDLE）
     if (scanState === ScanState.COOLDOWN) {
