@@ -663,6 +663,8 @@ function switchSource(source) {
             imageFeed.classList.add('hidden');
         }
         video.classList.remove('hidden');
+        currentSource = 'camera';
+        updateSourceButtons();
         setupCamera();
     }
 }
