@@ -32,7 +32,6 @@ import {
 import {
     initCamera,
     setupCamera,
-    stopCameraStream,
     switchSource,
     switchCameraDevice,
     toggleFacingMode,
@@ -230,13 +229,10 @@ function init() {
 
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-            // 画面が非表示になったらスキャンとカメラを停止
+            // 画面が非表示になったらスキャンのみ停止（カメラは維持）
             if (getScanState() !== ScanState.IDLE) stopScanning();
-            stopCameraStream();
-        } else if (getCurrentSource() === 'camera') {
-            // 画面が表示に戻ったらカメラを再起動
-            setupCamera();
         }
+        // カメラストリームは停止しない — タブ復帰時の再起動も不要
     });
 
     // ─── 起動時の初期化 ──────────────────────────────────────
