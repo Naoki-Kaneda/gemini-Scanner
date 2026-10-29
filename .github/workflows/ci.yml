@@ -27,6 +27,9 @@ jobs:
       - name: リンター
         run: ruff check .
 
+      - name: 型チェック（Python）
+        run: mypy
+
       - name: サーバー側テスト
         run: python -m pytest tests/ -q -m "not e2e"
 

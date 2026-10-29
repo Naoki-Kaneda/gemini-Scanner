@@ -24,6 +24,7 @@ python -m pytest tests/test_api.py::TestAnalyzeEndpoint::test_missing_image -v  
 
 # リンター・セキュリティ
 ruff check .                             # リンター（ruff format は使わない。下の「開発時の注意点」参照）
+mypy                                     # 型チェック（対象は pyproject.toml の [tool.mypy] files）
 bandit -r . --exclude ./tests            # セキュリティ監査
 
 # 本番デプロイ（gunicorn）

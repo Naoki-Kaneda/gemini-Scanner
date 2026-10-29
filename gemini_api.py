@@ -281,7 +281,7 @@ _THINKING_STRATEGY_TABLE = {
     ("gemini-3", "pro"):   {"thinkingLevel": "MINIMAL"}, # 最小思考（公式でMINIMAL対応確認済み）
 }
 
-_warned_unknown_model = set()  # 未知モデル警告の重複抑制
+_warned_unknown_model: set[str] = set()  # 未知モデル警告の重複抑制
 
 
 def _resolve_thinking_config():

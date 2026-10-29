@@ -15,3 +15,7 @@ force-exclude = true
 # ruff format は使わない。コメント位置や辞書の列（_MODE_HANDLERS 等）を手で揃えており、
 # 一括整形すると崩れるため。リンター（ruff check）だけを使う
 exclude = ["*"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app.py", "gemini_api.py", "rate_limiter.py", "translations.py"]

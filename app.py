@@ -117,8 +117,11 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 # テンプレートをリクエストごとにディスクから再読み込み
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
+# 静的ファイルの置き場所（Flask の型定義では None を取りうるが、このアプリでは常に設定されている）
+_STATIC_DIR: str = app.static_folder or "static"
+
 # 静的ファイルのハッシュキャッシュ（起動中はファイル変更時に自動更新）
-_static_hash_cache = {}
+_static_hash_cache: dict[str, tuple[float, str]] = {}
 
 
 def _static_file_hash(filename: str) -> str:
@@ -127,7 +130,7 @@ def _static_file_hash(filename: str) -> str:
     filename単位でキャッシュし、mtimeが変わったら上書きする。
     従来は filename:mtime をキーにしていたため更新のたびに辞書が肥大していた。
     """
-    filepath = os.path.join(app.static_folder, filename)
+    filepath = os.path.join(_STATIC_DIR, filename)
     try:
         mtime = os.path.getmtime(filepath)
         cached = _static_hash_cache.get(filename)
@@ -160,16 +163,16 @@ def _js_bundle_hash() -> str:
     max_mtime = 0.0
     for name in _JS_MODULE_FILES:
         try:
-            mt = os.path.getmtime(os.path.join(app.static_folder, name))
+            mt = os.path.getmtime(os.path.join(_STATIC_DIR, name))
             if mt > max_mtime:
                 max_mtime = mt
         except OSError:
             pass
     if _js_bundle_cache["mtime"] == max_mtime and max_mtime > 0:
-        return _js_bundle_cache["hash"]
+        return str(_js_bundle_cache["hash"])
     h = hashlib.md5()
     for name in _JS_MODULE_FILES:
-        filepath = os.path.join(app.static_folder, name)
+        filepath = os.path.join(_STATIC_DIR, name)
         try:
             with open(filepath, "rb") as f:
                 h.update(f.read())
@@ -194,7 +197,8 @@ def inject_template_globals():
 # プロキシ配下でのIP取得を正しく行う（X-Forwarded-For対応）
 TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
 if TRUST_PROXY:
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+    # Flask 公式の書き方（メソッドへの代入）。mypy の method-assign 指摘はこの行だけ抑える
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)  # type: ignore[method-assign]
     logger.info("TRUST_PROXY: X-Forwarded-For からクライアントIPを取得します")
 else:
     # Render/nginx等のプロキシ環境を検出して警告

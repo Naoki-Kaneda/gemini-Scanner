@@ -3,3 +3,6 @@ ruff==0.9.6
 bandit==1.8.2
 pip-audit==2.7.3
 playwright==1.49.1
+mypy==2.4.1
+types-requests==2.33.0.20261006
+types-cachetools==5.5.0.20240820
