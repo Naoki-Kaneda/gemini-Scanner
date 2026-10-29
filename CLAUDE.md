@@ -25,6 +25,7 @@ python -m pytest tests/test_api.py::TestAnalyzeEndpoint::test_missing_image -v  
 # リンター・セキュリティ
 ruff check .                             # リンター（ruff format は使わない。下の「開発時の注意点」参照）
 mypy                                     # 型チェック（対象は pyproject.toml の [tool.mypy] files）
+npx -y -p typescript@7.0.2 tsc -p jsconfig.json  # JSの型チェック（JSDoc、strict無効。node が必要）
 bandit -r . --exclude ./tests            # セキュリティ監査
 
 # 本番デプロイ（gunicorn）
@@ -257,5 +258,6 @@ E2Eテストの注意:
 - CSPヘッダーはリクエストごとに`g.csp_nonce`を生成し`unsafe-inline`を完全排除
 - `ADMIN_SECRET`認証は`secrets.compare_digest()`でタイミング攻撃を防止
 - 新しいJSモジュールを足したら `app.py` の `_JS_MODULE_FILES` にも足す。漏れるとキャッシュ更新（`?v=` ハッシュ）の対象から外れ、利用者のブラウザに古い版が残る
+- JS の型チェックは strict 無効（strict にすると暗黙の any が約200件出る）。DOM 要素の型は `/** @type {HTMLInputElement|null} */ (document.getElementById(...))` のように JSDoc で付ける。ScanState の値を持つ変数は `@type {string}` を付けないと初期値の1状態に絞り込まれ、比較がすべてエラーになる
 - `ruff format` は使わない（`pyproject.toml` で無効化済み）。コメント位置や `_MODE_HANDLERS` などの列を手で揃えており、一括整形すると7ファイルが崩れる。書式の決まりは `.editorconfig`
 - 起動を確かめるときは `start.bat` ではなく `python app.py` を使う。`start.bat` はポートが使用中だと `set /p` で入力待ちになり止まる

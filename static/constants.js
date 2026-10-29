@@ -221,7 +221,9 @@ export const SCAN_TRANSITIONS = Object.freeze({
  *   - qualityMultiplier: JPEG品質に掛ける係数（0.0 〜 1.0）
  */
 export function getNetworkQualityMultiplier() {
-    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    // Network Information API は標準の型定義に無いため any として参照する
+    const nav  = /** @type {any} */ (navigator);
+    const conn = nav.connection || nav.mozConnection || nav.webkitConnection;
 
     // Network Information API が利用できない場合は最高品質で返す
     if (!conn) return { widthMultiplier: 1.0, qualityMultiplier: 1.0 };

@@ -42,10 +42,10 @@ let btnFlipCam;
 /** 検出済みの映像入力デバイス一覧 */
 let videoDevices = [];
 
-/** 現在使用中のカメラ向き（'environment': 外カメ, 'user': インカメ） */
+/** @type {'environment'|'user'} 現在使用中のカメラ向き（'environment': 外カメ, 'user': インカメ） */
 let currentFacingMode = 'environment';
 
-/** 現在の入力ソース（'camera' / 'image' / 'file'） */
+/** @type {'camera'|'image'|'file'} 現在の入力ソース */
 let currentSource = 'camera';
 
 /** ミラー（左右反転）が有効かどうか */
@@ -416,7 +416,7 @@ export function toggleMirror() {
  * @param {Function|null} stopScanningFn - スキャンループを停止するコールバック関数
  */
 export function handleFileUpload(event, stopScanningFn) {
-    const file = event.target.files[0];
+    const file = /** @type {HTMLInputElement} */ (event.target).files[0];
     if (!file) return;
 
     // カメラストリームとスキャンを停止する

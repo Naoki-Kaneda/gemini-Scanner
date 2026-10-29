@@ -30,6 +30,9 @@ jobs:
       - name: 型チェック（Python）
         run: mypy
 
+      - name: 型チェック（JS）
+        run: npx -y -p typescript@7.0.2 tsc -p jsconfig.json
+
       - name: サーバー側テスト
         run: python -m pytest tests/ -q -m "not e2e"
 

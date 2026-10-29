@@ -47,7 +47,7 @@ import {
 //    スキャン処理全体の状態を管理する変数群
 // ─────────────────────────────────────────────
 
-/** 現在のスキャン状態（ScanState 列挙値） */
+/** @type {string} 現在のスキャン状態（ScanState 列挙値） */
 let scanState = ScanState.IDLE;
 
 /** 現在の解析モード（'text' / 'object' / 'label' / 'face' / 'logo' / 'classify' / 'web'） */
@@ -633,7 +633,7 @@ async function captureAndAnalyze() {
 
     try {
         // ─── キーワードヒントの取得（入力欄が空なら省略） ───
-        const hintEl = document.getElementById('context-hint');
+        const hintEl = /** @type {HTMLInputElement|null} */ (document.getElementById('context-hint'));
         const hint   = hintEl ? hintEl.value.trim().slice(0, 200) : '';
 
         // ─── API リクエスト送信（指数バックオフ付きリトライ） ───
@@ -997,7 +997,7 @@ export function setMode(mode) {
     clearOverlay();
 
     // ヒント入力欄の placeholder をモードに合わせて切り替える
-    const hintEl = document.getElementById('context-hint');
+    const hintEl = /** @type {HTMLInputElement|null} */ (document.getElementById('context-hint'));
     if (hintEl) {
         hintEl.placeholder = MODE_HINT_PLACEHOLDER[mode] || MODE_HINT_PLACEHOLDER.text;
     }
