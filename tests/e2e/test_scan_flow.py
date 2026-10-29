@@ -40,6 +40,9 @@ def test_image_upload_sends_and_shows_result(scanner, tmp_path):
     """静止画をアップロードしてスタートすると、解析結果が一覧に出てIDLEに戻る。"""
     page = scanner.page
     sent = scanner.mock_analyze(body=TEXT_SUCCESS)
+    # 起動時のカメラ初期化（非同期）が終わる前にアップロードすると、
+    # 初期化の完了時に入力元が camera に戻ってしまうため、先に待つ
+    scanner.wait_camera_ready()
 
     image_path = tmp_path / "sample.png"
     image = Image.new("RGB", (320, 240), "white")
