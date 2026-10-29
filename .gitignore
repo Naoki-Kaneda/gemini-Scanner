@@ -4,3 +4,14 @@ __pycache__/
 .pytest_cache/
 certs/
 docs/render-deploy.md
+
+# 仮想環境
+venv/
+.venv/
+
+# 個人のツール設定・作業の残骸（エージェントの git add で混入させない）
+.claude/settings.local.json
+.serena/
+.playwright-mcp/
+/*.png
+test_payload.txt
