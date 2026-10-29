@@ -42,8 +42,15 @@ rate_limiter.py → 2段階レート制限（分/日）。Redis or インメモ�
 translations.py → 英語→日本語翻訳辞書（物体名・感情・ラベル）
 
 templates/index.html → メインUI（MD3ダークテーマ、CSP nonce付き）
-static/script.js     → カメラ制御、フレーム差分検出、API通信、結果描画
 static/style.css     → レスポンシブ/グラスモーフィズム
+
+# フロントエンド ESモジュール構成（static/）
+app.js           → エントリポイント。イベントバインド・初期化・visibilitychangeハンドラ
+constants.js     → ScanState列挙型・設定定数・共有状態
+camera.js        → カメラストリーム制御・デバイス切替・ファイルアップロード
+scanner.js       → スキャンループ・安定化検出・captureAndAnalyze・重複判定
+api-client.js    → fetchWithRetry・API通信・使用量/レート制限/プロキシ設定の取得
+ui-manager.js    → DOM操作・結果描画・ステータス表示・syncUI()による状態ベースUI同期
 ```
 
 ### リクエスト処理パイプライン（POST /api/analyze）
@@ -113,7 +120,7 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
 - **キー方式**: デフォルト`ip`（IPのみ）。`ip_ua`（IP+SHA256(UserAgent[:64])[:8]）は`RATE_LIMIT_KEY_MODE=ip_ua`で有効化
 - **キー方式選択指針**: `ip`はUA偽装による回避を防止できるためデフォルト推奨。NAT/共有IP環境で個別制御が必要な場合のみ`ip_ua`を検討
 
-### フロントエンド状態機械（script.js）
+### フロントエンド状態機械（constants.js / scanner.js）
 
 スキャンの状態管理は `ScanState` 列挙型と `transitionTo()` で一元管理:
 
@@ -150,7 +157,7 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
               │  ┌──────────────┐        │  │  ┌──────────────────┐
               │  │ PAUSED_ERROR │        │  │  │ PAUSED_DUPLICATE │
               │  └──────────────┘        │  │  └──────────────────┘
-              │        │  RETRY_DELAY後  │  │
+              │        │  バックオフ後   │  │
               │        └────────────────>│  │
               │           startScanning()│  │
               │                          │  │
@@ -173,10 +180,12 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
 | ANALYZING → PAUSED_ERROR | 通信エラー（catch） | `scheduleRetry()` |
 | ANALYZING → PAUSED_DUPLICATE | API成功+重複N回 | `captureAndAnalyze()` finally |
 | ANALYZING → COOLDOWN | 429分制限 | `startCooldownCountdown()` |
-| PAUSED_ERROR → SCANNING | RETRY_DELAY_MS(10秒)後 | `scheduleRetry()` callback |
+| PAUSED_ERROR → SCANNING | 5秒×2^(n-1)×ジッター後（上限60秒） | `scheduleRetry()` callback |
 | PAUSED_DUPLICATE → SCANNING | カメラ移動検出 / モード変更 | `checkStabilityAndCapture()` |
 | COOLDOWN → IDLE | カウントダウン終了 | `stopCooldownCountdown()` |
 | 全状態 → IDLE | 手動停止 / タブ離脱 | `stopScanning()`（強制リセット） |
+
+注意: タブ離脱時（visibilitychange）はスキャンのみ停止し、カメラストリームは維持する（app.js）。
 
 ### フロントエンド安定化パイプライン
 
@@ -189,7 +198,7 @@ scanLoop() → requestAnimationFrame
               ├── 8×8グレースケールハッシュで前回画像と比較（≥95%→APIスキップ）
               ├── fetchWithRetry('/api/analyze') → 指数バックオフ付きリトライ
               ├── computeResultFingerprint() → 重複検出（N回連続一致で一時停止）
-              └── エラー時: scheduleRetry()で10秒後に自動復帰
+              └── エラー時: scheduleRetry()で指数バックオフ後に自動復帰（5秒〜上限60秒）
 ```
 
 ### CSSレイアウト注意点
@@ -201,7 +210,6 @@ scanLoop() → requestAnimationFrame
 - `tests/conftest.py` → 共有フィクスチャ（`client`、画像生成ヘルパー、モックファクトリ）
 - `tests/test_api.py` → Flask APIエンドポイント統合テスト
 - `tests/test_gemini_api.py` → Gemini API単体テスト（リトライ・パーサー・エラー処理）
-- `tests/e2e/` → Playwright E2Eテスト（`@pytest.mark.e2e`で分離）
 
 テスト用ヘルパー: `create_valid_image_base64()`, `create_valid_png_base64()`, `make_b64()`, `make_mock_response()`
 
@@ -212,7 +220,7 @@ scanLoop() → requestAnimationFrame
 | 変数 | デフォルト | 説明 |
 |------|---------|------|
 | `GEMINI_API_KEY` | 必須 | Google Gemini APIキー |
-| `GEMINI_MODEL` | gemini-2.5-flash | 使用モデル |
+| `GEMINI_MODEL` | gemini-2.5-flash-lite | 使用モデル（`.env.example`・`render.yaml` は `gemini-2.5-flash` を明示指定） |
 | `GEMINI_429_MAX_RETRIES` | 2 | 429リトライ回数 |
 | `GEMINI_429_BACKOFF_BASE_SECONDS` | 1.5 | バックオフ基準秒（ジッター付き指数バックオフ） |
 | `PROXY_URL` | 空 | HTTPプロキシ |
@@ -232,8 +240,8 @@ scanLoop() → requestAnimationFrame
 ## デプロイ構成
 
 - **Render**: `render.yaml`（gunicorn + 環境変数）
-- **Ubuntu**: `deploy/setup-ubuntu.sh`（nginx:8444 + gunicorn:8001 + systemd自動セットアップ）
-- **Python**: 3.12.0（`runtime.txt`）
+- **Ubuntu**: `deploy/setup-ubuntu.sh`（nginx:8444 + gunicorn:8001 + systemd `gemini-scanner.service`）
+- **Python**: 3.12.0（`runtime.txt`）。手元は `.python-version`（3.12）で揃える
 
 ## 開発時の注意点
 
@@ -242,3 +250,5 @@ scanLoop() → requestAnimationFrame
 - `_warned_unknown_model` setで未知モデル警告ログの重複を抑制している
 - CSPヘッダーはリクエストごとに`g.csp_nonce`を生成し`unsafe-inline`を完全排除
 - `ADMIN_SECRET`認証は`secrets.compare_digest()`でタイミング攻撃を防止
+- 新しいJSモジュールを足したら `app.py` の `_JS_MODULE_FILES` にも足す。漏れるとキャッシュ更新（`?v=` ハッシュ）の対象から外れ、利用者のブラウザに古い版が残る
+- 起動を確かめるときは `start.bat` ではなく `python app.py` を使う。`start.bat` はポートが使用中だと `set /p` で入力待ちになり止まる
