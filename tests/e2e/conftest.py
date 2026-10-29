@@ -13,7 +13,6 @@ import pytest
 from playwright.sync_api import sync_playwright
 from werkzeug.serving import make_server
 
-import gemini_api
 from app import app
 from rate_limiter import reset_for_testing
 
@@ -37,10 +36,11 @@ def _write_still_y4m(path, width=640, height=480, frames=30):
 
 @pytest.fixture(scope="session")
 def server_url():
-    """テスト用に Flask アプリを空いているポートで起動し、URL を返す。"""
-    # 偽応答の差し替えが外れても、本物のキーで課金されないようダミーに置き換える
-    original_key = gemini_api.API_KEY
-    gemini_api.API_KEY = "dummy-key-for-e2e"
+    """テスト用に Flask アプリを空いているポートで起動し、URL を返す。
+
+    API キーは tests/conftest.py でダミーに置き換え済み。偽応答の差し替えが外れても、
+    本物のキーで課金されることはない。
+    """
     reset_for_testing()
 
     server = make_server("127.0.0.1", 0, app, threaded=True)
@@ -49,7 +49,6 @@ def server_url():
     yield f"http://127.0.0.1:{server.server_port}"
 
     server.shutdown()
-    gemini_api.API_KEY = original_key
 
 
 @pytest.fixture(scope="session")

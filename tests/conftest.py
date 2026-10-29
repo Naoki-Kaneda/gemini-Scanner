@@ -4,12 +4,18 @@ test_api.py / test_gemini_api.py の重複コードを一元管理する。
 """
 
 import base64
+import os
 
-import pytest
-from unittest.mock import MagicMock
+# Gemini API は全テストでモックする。手元の .env の本物のキーに頼らず、
+# .env の無い環境（CI など）でも同じ結果になるようダミーのキーを入れる。
+# app / gemini_api が読み込み時にキーを読むため、import より前に設定する
+os.environ["GEMINI_API_KEY"] = "dummy-key-for-tests"
 
-from app import app
-from rate_limiter import reset_for_testing
+import pytest  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
+
+from app import app  # noqa: E402
+from rate_limiter import reset_for_testing  # noqa: E402
 
 
 # ─── 共有フィクスチャ ──────────────────────────────
