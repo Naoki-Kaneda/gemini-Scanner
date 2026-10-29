@@ -31,7 +31,8 @@ MINUTE_RATE_LIMITED = {
     "error_code": "RATE_LIMITED",
     "message": "リクエストが多すぎます",
     "request_id": "e2e0000000000002",
-    "retry_after": 2,
+    # 「待機中」の確認から無効化の確認までに COOLDOWN が終わらないよう、数秒の余裕を持たせる
+    "retry_after": 3,
     "limit_type": "minute",
 }
 
