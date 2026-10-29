@@ -23,8 +23,7 @@ python -m pytest tests/test_gemini_api.py -q  # Gemini API単体テストのみ
 python -m pytest tests/test_api.py::TestAnalyzeEndpoint::test_missing_image -v  # 単一テスト
 
 # リンター・セキュリティ
-ruff check .                             # リンター
-ruff format .                            # フォーマッター
+ruff check .                             # リンター（ruff format は使わない。下の「開発時の注意点」参照）
 bandit -r . --exclude ./tests            # セキュリティ監査
 
 # 本番デプロイ（gunicorn）
@@ -251,4 +250,5 @@ scanLoop() → requestAnimationFrame
 - CSPヘッダーはリクエストごとに`g.csp_nonce`を生成し`unsafe-inline`を完全排除
 - `ADMIN_SECRET`認証は`secrets.compare_digest()`でタイミング攻撃を防止
 - 新しいJSモジュールを足したら `app.py` の `_JS_MODULE_FILES` にも足す。漏れるとキャッシュ更新（`?v=` ハッシュ）の対象から外れ、利用者のブラウザに古い版が残る
+- `ruff format` は使わない（`pyproject.toml` で無効化済み）。コメント位置や `_MODE_HANDLERS` などの列を手で揃えており、一括整形すると7ファイルが崩れる。書式の決まりは `.editorconfig`
 - 起動を確かめるときは `start.bat` ではなく `python app.py` を使う。`start.bat` はポートが使用中だと `set /p` で入力待ちになり止まる

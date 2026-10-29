@@ -9,3 +9,10 @@ markers = [
 
 [tool.ruff]
 exclude = ["tests/e2e/*"]
+# 個別ファイルを指定して実行しても exclude を効かせる
+force-exclude = true
+
+[tool.ruff.format]
+# ruff format は使わない。コメント位置や辞書の列（_MODE_HANDLERS 等）を手で揃えており、
+# 一括整形すると崩れるため。リンター（ruff check）だけを使う
+exclude = ["*"]
