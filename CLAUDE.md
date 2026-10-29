@@ -209,6 +209,12 @@ scanLoop() → requestAnimationFrame
 - `tests/conftest.py` → 共有フィクスチャ（`client`、画像生成ヘルパー、モックファクトリ）
 - `tests/test_api.py` → Flask APIエンドポイント統合テスト
 - `tests/test_gemini_api.py` → Gemini API単体テスト（リトライ・パーサー・エラー処理）
+- `tests/e2e/` → 画面側のE2Eテスト（Playwright）。`python -m pytest tests/e2e -q -m e2e` で実行（初回は `python -m playwright install chromium`）。偽カメラ（静止したY4M映像）と `page.route` による偽の `/api/analyze` 応答を使い、カメラもAPIキーも不要
+
+E2Eテストの注意:
+- 状態は `transitionTo()` のコンソール出力（`状態遷移: X → Y`）で追う。`stopScanning()` と COOLDOWN 終了は `transitionTo()` を通らずログが出ないので、`#btn-scan`・`#status-text` の文言で確かめる
+- アプリの CSP が `unsafe-eval` を許さず `wait_for_function` が止まるため、コンテキストは `bypass_csp=True` で作る
+- `static/*.js` を変えたら E2E も走らせる
 
 テスト用ヘルパー: `create_valid_image_base64()`, `create_valid_png_base64()`, `make_b64()`, `make_mock_response()`
 
