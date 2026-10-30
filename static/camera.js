@@ -396,7 +396,9 @@ export function switchSource(source) {
         }
 
         // <video> 要素を表示してカメラを起動する
+        // カメラ表示中に押された場合に備え、今の映像を止めてから起動し直す（止めないとトラックが残る）
         if (video) video.classList.remove('hidden');
+        stopCameraStream();
         currentSource = 'camera';
         updateSourceButtons(currentSource);
         setupCamera();
