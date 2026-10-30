@@ -179,7 +179,7 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
 | IDLE → SCANNING | ボタン押下 / cooldown終了 | `startScanning()` |
 | SCANNING → ANALYZING | 安定検出完了 | `captureAndAnalyze()` |
 | SCANNING → PAUSED_DUPLICATE | API成功+重複N回連続（ANALYZING から SCANNING を経由して入る。ループは継続） | `captureAndAnalyze()` finally |
-| ANALYZING → IDLE | ワンショット・静止画でAPI成功/失敗（finallyブロック） | `captureAndAnalyze()` |
+| ANALYZING → IDLE | ワンショット・静止画・動画ファイルでAPI成功/失敗（finallyブロック） | `captureAndAnalyze()` |
 | ANALYZING → SCANNING | 連続よみモードでAPI完了 / 連続よみで画像ハッシュ一致（送信スキップ） | `captureAndAnalyze()` |
 | ANALYZING → PAUSED_ERROR | 通信エラー（catch）。続けて自動復帰を予約 | `captureAndAnalyze()` → `scheduleRetry()` |
 | ANALYZING → COOLDOWN | 429分制限 | `captureAndAnalyze()` → `startCooldownCountdown()` |
