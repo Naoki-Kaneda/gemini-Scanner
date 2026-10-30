@@ -170,20 +170,22 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
               │                   └──────────┘
 ```
 
+図の「重複N回」の矢印は、実際には ANALYZING → SCANNING → PAUSED_DUPLICATE と2段で遷移する（`SCAN_TRANSITIONS` は ANALYZING → PAUSED_DUPLICATE を許すが、コードでは使っていない）。
+
 遷移のトリガー詳細:
 
 | 遷移 | トリガー | 関数 |
 |------|----------|------|
 | IDLE → SCANNING | ボタン押下 / cooldown終了 | `startScanning()` |
 | SCANNING → ANALYZING | 安定検出完了 | `captureAndAnalyze()` |
-| SCANNING → PAUSED_DUPLICATE | 重複N回連続（ループは継続） | `checkStabilityAndCapture()` |
-| ANALYZING → IDLE | API成功/失敗（finallyブロック） | `captureAndAnalyze()` |
-| ANALYZING → PAUSED_ERROR | 通信エラー（catch） | `scheduleRetry()` |
-| ANALYZING → PAUSED_DUPLICATE | API成功+重複N回 | `captureAndAnalyze()` finally |
-| ANALYZING → COOLDOWN | 429分制限 | `startCooldownCountdown()` |
+| SCANNING → PAUSED_DUPLICATE | API成功+重複N回連続（ANALYZING から SCANNING を経由して入る。ループは継続） | `captureAndAnalyze()` finally |
+| ANALYZING → IDLE | ワンショット・静止画・動画ファイルでAPI成功/失敗（finallyブロック） | `captureAndAnalyze()` |
+| ANALYZING → SCANNING | 連続よみモードでAPI完了 / 連続よみで画像ハッシュ一致（送信スキップ） | `captureAndAnalyze()` |
+| ANALYZING → PAUSED_ERROR | 通信エラー（catch）。続けて自動復帰を予約 | `captureAndAnalyze()` → `scheduleRetry()` |
+| ANALYZING → COOLDOWN | 429分制限 | `captureAndAnalyze()` → `startCooldownCountdown()` |
 | PAUSED_ERROR → SCANNING | 5秒×2^(n-1)×ジッター後（上限60秒） | `scheduleRetry()` callback |
-| PAUSED_DUPLICATE → SCANNING | カメラ移動検出 / モード変更 | `checkStabilityAndCapture()` |
-| COOLDOWN → IDLE | カウントダウン終了 | `stopCooldownCountdown()` |
+| PAUSED_DUPLICATE → SCANNING | カメラ移動検出 / モード変更 / 重複回数スライダー操作 | `checkStabilityAndCapture()` / `setMode()` / app.js |
+| COOLDOWN → IDLE | カウントダウン終了（`transitionTo()` を通らず直接代入） | `stopCooldownCountdown()` |
 | 全状態 → IDLE | 手動停止 / タブ離脱 | `stopScanning()`（強制リセット） |
 
 注意: タブ離脱時（visibilitychange）はスキャンのみ停止し、カメラストリームは維持する（app.js）。

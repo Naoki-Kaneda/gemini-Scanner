@@ -113,15 +113,47 @@ class ScannerPage:
         )
 
 
-@pytest.fixture
-def scanner(browser, server_url):
+# getUserMedia の完了を、テストが window.__releaseCamera() を呼ぶまで止める
+_HOLD_CAMERA_SCRIPT = """
+(() => {
+    const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    window.__releaseCamera = release;
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+        await gate;
+        const stream = await original(constraints);
+        window.__cameraDelivered = true;
+        return stream;
+    };
+})();
+"""
+
+
+def _open_scanner(browser, server_url, init_script=None):
     """カメラ権限付きの新しいコンテキストでアプリを開く（テストごとに localStorage も空）。"""
     # bypass_csp: アプリの CSP は unsafe-eval を許さず、Playwright の wait_for_function の
     # 繰り返し確認が止められるため。CSP ヘッダー自体は tests/test_api.py で確かめている
     context = browser.new_context(permissions=["camera"], base_url=server_url, bypass_csp=True)
+    if init_script:
+        context.add_init_script(init_script)
     page = context.new_page()
     page.route(_EXTERNAL_FONTS, lambda route: route.abort())
     scanner_page = ScannerPage(page)
     page.goto("/")
+    return context, scanner_page
+
+
+@pytest.fixture
+def scanner(browser, server_url):
+    context, scanner_page = _open_scanner(browser, server_url)
+    yield scanner_page
+    context.close()
+
+
+@pytest.fixture
+def scanner_camera_held(browser, server_url):
+    """起動時のカメラ取得を止めた状態でアプリを開く。window.__releaseCamera() で再開する。"""
+    context, scanner_page = _open_scanner(browser, server_url, _HOLD_CAMERA_SCRIPT)
     yield scanner_page
     context.close()

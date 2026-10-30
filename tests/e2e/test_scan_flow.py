@@ -37,20 +37,22 @@ MINUTE_RATE_LIMITED = {
 }
 
 
-def test_image_upload_sends_and_shows_result(scanner, tmp_path):
-    """静止画をアップロードしてスタートすると、解析結果が一覧に出てIDLEに戻る。"""
-    page = scanner.page
-    sent = scanner.mock_analyze(body=TEXT_SUCCESS)
-    # 起動時のカメラ初期化（非同期）が終わる前にアップロードすると、
-    # 初期化の完了時に入力元が camera に戻ってしまうため、先に待つ
-    scanner.wait_camera_ready()
-
+def _make_sample_png(tmp_path):
+    """白地に黒い四角の静止画を作り、そのパスを返す。"""
     image_path = tmp_path / "sample.png"
     image = Image.new("RGB", (320, 240), "white")
     ImageDraw.Draw(image).rectangle([40, 60, 280, 180], fill="black")
     image.save(image_path)
+    return image_path
 
-    page.set_input_files("#file-input", str(image_path))
+
+def test_image_upload_sends_and_shows_result(scanner, tmp_path):
+    """静止画をアップロードしてスタートすると、解析結果が一覧に出てIDLEに戻る。"""
+    page = scanner.page
+    sent = scanner.mock_analyze(body=TEXT_SUCCESS)
+    scanner.wait_camera_ready()
+
+    page.set_input_files("#file-input", str(_make_sample_png(tmp_path)))
     page.wait_for_function("() => document.getElementById('image-feed').naturalWidth > 0")
     page.click("#btn-scan")
 
@@ -60,6 +62,28 @@ def test_image_upload_sends_and_shows_result(scanner, tmp_path):
     assert len(sent) == 1
     assert sent[0]["mode"] == "text"
     assert sent[0]["image"].startswith("data:image/jpeg;base64,")
+
+
+def test_image_upload_during_camera_startup_keeps_image(scanner_camera_held, tmp_path):
+    """起動時のカメラ取得を待つ間に静止画を選んでも、遅れて届いたカメラ映像で上書きされない。"""
+    scanner = scanner_camera_held
+    page = scanner.page
+    sent = scanner.mock_analyze(body=TEXT_SUCCESS)
+
+    page.set_input_files("#file-input", str(_make_sample_png(tmp_path)))
+    page.wait_for_function("() => document.getElementById('image-feed').naturalWidth > 0")
+
+    # 静止画を選んだあとでカメラの取得を完了させる
+    page.evaluate("() => window.__releaseCamera()")
+    page.wait_for_function("() => window.__cameraDelivered === true")
+
+    expect(page.locator("#image-feed")).to_be_visible()
+    camera_attached = page.evaluate("() => document.getElementById('video-feed').srcObject !== null")
+    assert not camera_attached
+
+    page.click("#btn-scan")
+    expect(page.locator("#status-text")).to_have_text("完了 ― スタートで再スキャン")
+    assert len(sent) == 1
 
 
 def test_camera_one_shot_goes_through_analyzing(scanner):

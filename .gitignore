@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 certs/
+# 本番（Render）の秘密の値を含むため、手元だけに置く
 docs/render-deploy.md
 
 # 仮想環境
