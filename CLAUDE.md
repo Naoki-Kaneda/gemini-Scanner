@@ -103,7 +103,9 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
 
 ### Thinking戦略テーブル
 
-`_THINKING_STRATEGY_TABLE`でモデル世代×タイプ（flash/pro）のthinkingConfigを制御。空辞書はペイロードから`thinkingConfig`キーごと除外される（APIデフォルト動作）。未知モデルは安全側に空辞書を返す。
+`_THINKING_STRATEGY_TABLE`でモデル世代×タイプ（flash/pro）のthinkingConfigを制御。空辞書はペイロードから`thinkingConfig`キーごと除外される（APIデフォルト動作）。未知モデルは安全側に空辞書を返す。上から順に照合するので、個別の世代（`gemini-3.8`）は `gemini-3` より上に置く。3.8-flash は MINIMAL が 400 になるため LOW。
+
+`temperature` は gemini-2.x にだけ送る。3.x では廃止され（無視され、今後の世代では 400）、決定性は System Instruction で担保する。
 
 ### System Instruction
 
@@ -229,7 +231,7 @@ E2Eテストの注意:
 | 変数 | デフォルト | 説明 |
 |------|---------|------|
 | `GEMINI_API_KEY` | 必須 | Google Gemini APIキー |
-| `GEMINI_MODEL` | gemini-2.5-flash-lite | 使用モデル（`.env.example`・`render.yaml` は `gemini-2.5-flash` を明示指定） |
+| `GEMINI_MODEL` | gemini-3.8-flash | 使用モデル。`gemini-2.5-flash` に戻すと応答が約1.3秒速く料金も安い（2026-10 実測） |
 | `GEMINI_429_MAX_RETRIES` | 2 | 429リトライ回数 |
 | `GEMINI_429_BACKOFF_BASE_SECONDS` | 1.5 | バックオフ基準秒（ジッター付き指数バックオフ） |
 | `PROXY_URL` | 空 | HTTPプロキシ |
