@@ -51,6 +51,12 @@ let currentSource = 'camera';
 /** ミラー（左右反転）が有効かどうか */
 let isMirrored = false;
 
+/**
+ * カメラ起動の受付番号。起動のたびと静止画・動画への切替時に進める。
+ * カメラの許可待ちの間に入力元が変わった場合、遅れて届いた映像を捨てるために使う。
+ */
+let cameraRequestId = 0;
+
 
 // ─────────────────────────────────────────────
 // 2. 初期化
@@ -143,6 +149,7 @@ export function stopCameraStream() {
  * @returns {Promise<void>}
  */
 export async function setupCamera(deviceId = null) {
+    const requestId = ++cameraRequestId;
     try {
         // 希望解像度とカメラ向き（またはデバイスID）の制約を組み立てる
         const constraints = {
@@ -173,12 +180,21 @@ export async function setupCamera(deviceId = null) {
             });
         }
 
+        // 取得を待つ間に静止画・動画へ切り替えられた（または次の起動が始まった）場合は、この映像を捨てる
+        if (requestId !== cameraRequestId) {
+            stream.getTracks().forEach(track => track.stop());
+            return;
+        }
+
         // 取得したストリームを <video> 要素にセットして再生する
         video.srcObject = stream;
         await video.play().catch((err) => {
             console.warn('映像再生の開始に失敗:', err.name);
             setStatusMessage('⚠ カメラ映像の再生に失敗しました');
         });
+
+        // 再生を待つ間に切り替えられた場合も入力元を上書きしない（映像は切替側で停止済み）
+        if (requestId !== cameraRequestId) return;
 
         currentSource = 'camera';
         updateSourceButtons(currentSource);
@@ -420,6 +436,8 @@ export function handleFileUpload(event, stopScanningFn) {
     if (!file) return;
 
     // カメラストリームとスキャンを停止する
+    // 起動途中のカメラがあれば、受付番号を進めて完了時の上書きを止める
+    cameraRequestId++;
     stopCameraStream();
     if (stopScanningFn) stopScanningFn();
 
