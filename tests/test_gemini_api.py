@@ -503,6 +503,8 @@ class TestTemperature:
         ("gemini-2.5-flash", True),
         ("gemini-3.8-flash", False),
         ("gemini-3-flash-preview", False),
+        ("GEMINI-2.5-FLASH", True),   # 大文字でも世代を判定できる
+        ("unknown-model", False),     # 未知モデルには送らない（安全側）
     ])
     def test_モデルの世代でtemperatureの有無が変わる(self, model_name, expected):
         import gemini_api

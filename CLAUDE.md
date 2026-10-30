@@ -105,7 +105,7 @@ Gemini APIが返す`box_2d`は`[ymin, xmin, ymax, xmax]`形式で**0〜1000ス�
 
 `_THINKING_STRATEGY_TABLE`でモデル世代×タイプ（flash/pro）のthinkingConfigを制御。空辞書はペイロードから`thinkingConfig`キーごと除外される（APIデフォルト動作）。未知モデルは安全側に空辞書を返す。上から順に照合するので、個別の世代（`gemini-3.8`）は `gemini-3` より上に置く。3.8-flash は MINIMAL が 400 になるため LOW。
 
-`temperature` は gemini-2.x にだけ送る。3.x では廃止され（無視され、今後の世代では 400）、決定性は System Instruction で担保する。
+`temperature` は gemini-2.x にだけ送る。3.x では廃止されている（今は無視され、今後の世代では 400）。
 
 ### System Instruction
 

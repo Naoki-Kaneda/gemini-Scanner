@@ -277,8 +277,8 @@ _SYSTEM_INSTRUCTION = (
 # 上から順に照合し最初に一致した行を使うため、個別の世代（gemini-3.8 など）は gemini-3 より上に置く
 _THINKING_STRATEGY_TABLE = {
     ("gemini-2", "flash"): {"thinkingBudget": 0},       # 思考無効化
-    ("gemini-3.8", "flash"): {"thinkingLevel": "LOW"},  # MINIMAL は非対応（400）。LOW が最小
     ("gemini-2", "pro"):   {},                           # 無効化不可 → 設定を送らない
+    ("gemini-3.8", "flash"): {"thinkingLevel": "LOW"},  # MINIMAL は非対応（400）。LOW が最小
     ("gemini-3", "flash"): {"thinkingLevel": "MINIMAL"}, # 最小思考
     ("gemini-3", "pro"):   {"thinkingLevel": "MINIMAL"}, # 最小思考（公式でMINIMAL対応確認済み）
 }

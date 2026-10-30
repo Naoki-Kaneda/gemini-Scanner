@@ -110,7 +110,7 @@ else
     cat > "$ENV_FILE" << ENVEOF
 # Gemini Vision Scanner 環境設定
 GEMINI_API_KEY=${API_KEY}
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 APP_PORT=5000
 FLASK_DEBUG=false
 NO_PROXY_MODE=true
