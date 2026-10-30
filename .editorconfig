@@ -1,0 +1,16 @@
+# エディタ共通の書式（既存ファイルの現物に合わせて記述）
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.md]
+# Markdown は行末の空白2つが改行の意味を持つため削らない
+trim_trailing_whitespace = false

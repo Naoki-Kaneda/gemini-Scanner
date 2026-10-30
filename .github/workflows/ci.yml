@@ -1,0 +1,43 @@
+# プッシュ・PR ごとにリンターとテスト（サーバー側・画面側E2E）を走らせる
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: 依存パッケージのインストール
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: リンター
+        run: ruff check .
+
+      - name: 型チェック（Python）
+        run: mypy
+
+      - name: 型チェック（JS）
+        run: npx -y -p typescript@7.0.2 tsc -p jsconfig.json
+
+      - name: サーバー側テスト
+        run: python -m pytest tests/ -q -m "not e2e"
+
+      - name: Chromium のインストール
+        run: python -m playwright install --with-deps chromium
+
+      - name: 画面側E2Eテスト
+        run: python -m pytest tests/e2e -q -m e2e

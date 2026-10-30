@@ -136,7 +136,7 @@ function init() {
     const modes = getModeButtons();
     Object.entries(modes).forEach(([key, btn]) => {
         if (btn) {
-            btn.addEventListener('click', () => setMode(key));
+            btn.addEventListener('click', () => setMode(/** @type {Parameters<typeof setMode>[0]} */ (key)));
         }
     });
 
@@ -169,7 +169,7 @@ function init() {
         document.addEventListener('click', (e) => {
             if (
                 !helpPopup.classList.contains('hidden')
-                && !helpPopup.contains(e.target)
+                && !helpPopup.contains(/** @type {Node} */ (e.target))
                 && e.target !== btnHelp
             ) {
                 helpPopup.classList.add('hidden');
@@ -186,7 +186,7 @@ function init() {
 
     // ─── 重複スキップ回数スライダー ──────────────────────────
 
-    const dupSlider = document.getElementById('duplicate-skip-count');
+    const dupSlider = /** @type {HTMLInputElement|null} */ (document.getElementById('duplicate-skip-count'));
     const dupValue  = document.getElementById('duplicate-skip-value');
 
     if (dupSlider) {
@@ -196,7 +196,7 @@ function init() {
             const parsed = parseInt(saved, 10);
             if (parsed >= 1 && parsed <= 5) {
                 setDuplicateSkipCount(parsed);
-                dupSlider.value = parsed;
+                dupSlider.value = String(parsed);
             }
         }
 
@@ -206,11 +206,11 @@ function init() {
         }
 
         // スライダー操作時の処理
-        dupSlider.addEventListener('input', (e) => {
-            const val = parseInt(e.target.value, 10);
+        dupSlider.addEventListener('input', () => {
+            const val = parseInt(dupSlider.value, 10);
             setDuplicateSkipCount(val);
             if (dupValue) dupValue.textContent = val + '回';
-            localStorage.setItem('duplicateSkipCount', val);
+            localStorage.setItem('duplicateSkipCount', String(val));
 
             // 重複停止中ならスキャンを再開
             if (getScanState() === ScanState.PAUSED_DUPLICATE) {

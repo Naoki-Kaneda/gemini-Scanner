@@ -129,7 +129,15 @@ API エンドポイントの詳細仕様（統一レスポンス形式・エラ�
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests/ -q
+python -m pytest tests/ -q -m "not e2e"   # サーバー側（ブラウザ不要）
+```
+
+画面側（`static/*.js`）のスキャン状態遷移は、Playwright の E2E テストで確かめます。
+Chromium の偽カメラと偽の API 応答を使うため、カメラも Gemini API キーも不要です。
+
+```bash
+python -m playwright install chromium     # 初回のみ
+python -m pytest tests/e2e -q -m e2e
 ```
 
 ## 本番デプロイ（Render）
