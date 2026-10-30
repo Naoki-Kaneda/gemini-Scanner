@@ -33,7 +33,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/"
 
 # プロキシ設定（NO_PROXY_MODE=trueなら初期状態でプロキシを無視）
@@ -241,7 +241,7 @@ MODE_SCHEMAS = {
     },
 }
 
-API_TIMEOUT_SECONDS = 30  # Gemini 2.5-flash（思考モデル）は応答に時間がかかるため余裕を持たせる
+API_TIMEOUT_SECONDS = 30  # 思考モデルは応答に時間がかかるため余裕を持たせる（3.8-flash の実測は約3〜5秒）
 GEMINI_429_MAX_RETRIES = max(0, int(os.getenv("GEMINI_429_MAX_RETRIES", "2")))  # 負値は0に正規化
 GEMINI_429_BACKOFF_BASE_SECONDS = float(os.getenv("GEMINI_429_BACKOFF_BASE_SECONDS", "1.5"))
 
@@ -259,7 +259,7 @@ CONTRAST_FACTOR = 1.5          # コントラスト強調係数
 SHARPNESS_FACTOR = 1.5         # シャープネス強調係数（文字の輪郭を明確に）
 JPEG_QUALITY = 95              # JPEG保存品質
 BOX_SCALE = 1000               # Gemini box_2d 座標の正規化スケール（0〜1000）
-GENERATION_TEMPERATURE = 0.1   # 低温度で一貫した結果を得る
+GENERATION_TEMPERATURE = 0.1   # 低温度で一貫した結果を得る（gemini-2.x のみ。3.x では廃止）
 SIGNIFICANT_EMOTION_LEVELS = frozenset({"POSSIBLE", "LIKELY", "VERY_LIKELY"})
 
 # ─── System Instruction（全モード共通制約） ──────────────
@@ -274,8 +274,10 @@ _SYSTEM_INSTRUCTION = (
 # ─── Thinking戦略テーブル ────────────────────────────
 # (世代プレフィックス, タイプキーワード) → thinkingConfig辞書
 # 空辞書はペイロードからthinkingConfigキーごと除外される（＝APIデフォルトに委任）
+# 上から順に照合し最初に一致した行を使うため、個別の世代（gemini-3.8 など）は gemini-3 より上に置く
 _THINKING_STRATEGY_TABLE = {
     ("gemini-2", "flash"): {"thinkingBudget": 0},       # 思考無効化
+    ("gemini-3.8", "flash"): {"thinkingLevel": "LOW"},  # MINIMAL は非対応（400）。LOW が最小
     ("gemini-2", "pro"):   {},                           # 無効化不可 → 設定を送らない
     ("gemini-3", "flash"): {"thinkingLevel": "MINIMAL"}, # 最小思考
     ("gemini-3", "pro"):   {"thinkingLevel": "MINIMAL"}, # 最小思考（公式でMINIMAL対応確認済み）
@@ -629,9 +631,12 @@ def _build_gemini_payload(image_b64, mode, context_hint=""):
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseSchema": MODE_SCHEMAS[mode],
-            "temperature": GENERATION_TEMPERATURE,
         },
     }
+
+    # temperature は gemini-2.x にだけ送る（3.x では廃止されて無視され、今後の世代では 400 になる）
+    if GEMINI_MODEL.lower().startswith("gemini-2"):
+        payload["generationConfig"]["temperature"] = GENERATION_TEMPERATURE
 
     # モデル別thinking設定（空辞書の場合はキーごと除外して安全側に倒す）
     thinking_config = _resolve_thinking_config()

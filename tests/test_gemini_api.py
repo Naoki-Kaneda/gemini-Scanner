@@ -432,6 +432,8 @@ class TestResolveThinkingConfig:
         # Gemini 2.x Pro系: thinking無効化不可 → 空辞書
         ("gemini-2.5-pro", {}),
         ("gemini-2.5-pro-preview-05-06", {}),
+        # Gemini 3.8 Flash: MINIMAL は非対応のため LOW
+        ("gemini-3.8-flash", {"thinkingLevel": "LOW"}),
         # Gemini 3.x Flash系: thinkingLevel: MINIMAL
         ("gemini-3.0-flash", {"thinkingLevel": "MINIMAL"}),
         ("gemini-3-flash-preview", {"thinkingLevel": "MINIMAL"}),
@@ -490,6 +492,27 @@ class TestResolveThinkingConfig:
                 make_b64(), mode="text", context_hint=""
             )
             assert "thinkingConfig" not in payload["generationConfig"]
+        finally:
+            gemini_api.GEMINI_MODEL = original
+
+
+class TestTemperature:
+    """temperature は gemini-2.x にだけ送り、廃止された 3.x には送らないことを検証する。"""
+
+    @pytest.mark.parametrize("model_name,expected", [
+        ("gemini-2.5-flash", True),
+        ("gemini-3.8-flash", False),
+        ("gemini-3-flash-preview", False),
+    ])
+    def test_モデルの世代でtemperatureの有無が変わる(self, model_name, expected):
+        import gemini_api
+        original = gemini_api.GEMINI_MODEL
+        gemini_api.GEMINI_MODEL = model_name
+        try:
+            payload = gemini_api._build_gemini_payload(
+                make_b64(), mode="text", context_hint=""
+            )
+            assert ("temperature" in payload["generationConfig"]) is expected
         finally:
             gemini_api.GEMINI_MODEL = original
 
